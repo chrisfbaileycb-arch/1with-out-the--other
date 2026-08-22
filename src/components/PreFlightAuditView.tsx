@@ -8,6 +8,7 @@ import {
   AxeViolationItem,
 } from "../types";
 import { runPreFlightScan } from "../services/api";
+import { generateAuditPdfReport } from "../services/pdfGenerator";
 import {
   ShieldCheck,
   Server,
@@ -36,6 +37,8 @@ import {
   Palette,
   Binary,
   Maximize2,
+  Download,
+  FileText,
 } from "lucide-react";
 
 interface PreFlightAuditViewProps {
@@ -120,6 +123,27 @@ export const PreFlightAuditView: React.FC<PreFlightAuditViewProps> = ({
   const [axeImpactFilter, setAxeImpactFilter] = useState<"all" | "critical" | "serious" | "moderate" | "minor">("all");
   const [axeError, setAxeError] = useState<string | null>(null);
   const [telemetryExported, setTelemetryExported] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const [pdfSuccessToast, setPdfSuccessToast] = useState<boolean>(false);
+
+  const handleDownloadPdf = () => {
+    if (!report) return;
+    setIsExportingPdf(true);
+    try {
+      generateAuditPdfReport({
+        report,
+        axeSummary,
+        manualChecks,
+        auditorName: "1WithOut Automated Launch Matrix & Axe-Core Engine",
+      });
+      setPdfSuccessToast(true);
+      setTimeout(() => setPdfSuccessToast(false), 3000);
+    } catch (err) {
+      console.error("Failed to generate PDF audit report:", err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
 
   const generateRemediationSnippet = (v: AxeRuleResult): string => {
     if (v.id.includes("color-contrast")) {
@@ -421,7 +445,35 @@ test.describe('A11y & ARIA Automated Matrix', () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {report && (
+            <button
+              id="download-preflight-pdf-top-btn"
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={isExportingPdf}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-xs border border-slate-700 hover:border-slate-600 transition-all cursor-pointer shadow-sm"
+              title="Download structured PDF verification report"
+            >
+              {isExportingPdf ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                  <span>Generating PDF...</span>
+                </>
+              ) : pdfSuccessToast ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span className="text-emerald-400">PDF Saved!</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>Download Report (PDF)</span>
+                </>
+              )}
+            </button>
+          )}
+
           <button
             id="preflight-scan-trigger-btn"
             type="button"
@@ -855,8 +907,8 @@ test.describe('A11y & ARIA Automated Matrix', () => {
               </p>
             </div>
 
-            <div className="flex items-center gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800 shrink-0">
-              <div className="text-center">
+            <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 shrink-0">
+              <div className="text-center sm:pr-4 sm:border-r sm:border-slate-800">
                 <div className="text-3xl font-extrabold text-white">
                   {report.launchReadinessScore}
                   <span className="text-xs text-slate-400 font-normal">/100</span>
@@ -864,16 +916,44 @@ test.describe('A11y & ARIA Automated Matrix', () => {
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">Readiness Score</p>
               </div>
 
-              {onSaveToRegistry && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  id="save-to-registry-btn"
+                  id="download-audit-pdf-btn"
                   type="button"
-                  onClick={() => onSaveToRegistry(report)}
-                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-md transition-colors"
+                  onClick={handleDownloadPdf}
+                  disabled={isExportingPdf}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md shadow-emerald-500/10 transition-all disabled:opacity-50"
+                  title="Download structured PDF verification report"
                 >
-                  Save to Registry
+                  {isExportingPdf ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Exporting...</span>
+                    </>
+                  ) : pdfSuccessToast ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>PDF Downloaded!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Report</span>
+                    </>
+                  )}
                 </button>
-              )}
+
+                {onSaveToRegistry && (
+                  <button
+                    id="save-to-registry-btn"
+                    type="button"
+                    onClick={() => onSaveToRegistry(report)}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-md transition-colors"
+                  >
+                    Save to Registry
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
