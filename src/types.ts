@@ -1,4 +1,137 @@
-export type TabType = "shipworthy" | "overview" | "discern" | "skills" | "audit" | "registry" | "defense";
+export type TabType =
+  | "cover"
+  | "launchpad"
+  | "storefront"
+  | "backoffice"
+  | "agent_workspace"
+  | "shipworthy"
+  | "overview"
+  | "discern"
+  | "skills"
+  | "audit"
+  | "registry"
+  | "defense";
+
+// -------------------------------------------------------------
+// OPC LAUNCHPAD & DOMAIN STUDIO DATA TYPES
+// -------------------------------------------------------------
+export interface DomainSuggestion {
+  domain: string;
+  tld: string;
+  pricePerYear: number;
+  isAvailable: boolean;
+  whoisStatus: "AVAILABLE" | "REGISTERED" | "PREMIUM";
+  registrarBadge: "Cloudflare" | "Namecheap" | "Google Domains" | "Vercel";
+  seoScore: number;
+  fitReason: string;
+}
+
+export interface BrandKit {
+  brandName: string;
+  tagline: string;
+  valueProposition: string;
+  targetAudience: string;
+  voiceTone: string;
+  primaryOklchColor: string;
+  secondaryOklchColor: string;
+  neutralBgColor: string;
+  typographyHeading: string;
+  typographyBody: string;
+  elevatorPitch: string;
+}
+
+// -------------------------------------------------------------
+// E-COMMERCE CATALOG & STOREFRONT TYPES
+// -------------------------------------------------------------
+export interface ProductModifierOption {
+  id: string;
+  name: string;
+  priceDelta: number;
+}
+
+export interface ProductModifier {
+  id: string;
+  name: string;
+  required: boolean;
+  options: ProductModifierOption[];
+}
+
+export interface ProductVariant {
+  id: string;
+  name: string; // e.g. "Standard (128GB)", "Large (32oz)"
+  sku: string;
+  price: number;
+  inventoryQty: number;
+}
+
+export interface ProductItem {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  category: string;
+  imageUrl?: string;
+  inventoryQty: number;
+  isPublished: boolean;
+  tags: string[];
+  variants?: ProductVariant[];
+  modifiers?: ProductModifier[];
+  rating?: number;
+}
+
+export interface CartLineItem {
+  product: ProductItem;
+  quantity: number;
+  selectedVariant?: ProductVariant;
+  selectedModifiers?: Record<string, ProductModifierOption>;
+  unitPrice: number;
+}
+
+export interface StoreOrder {
+  id: string;
+  orderNumber: string;
+  customerEmail: string;
+  items: CartLineItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  paymentStatus: "PAID" | "PENDING" | "REFUNDED" | "FAILED";
+  fulfillmentStatus: "UNFULFILLED" | "PROCESSING" | "SHIPPED" | "DELIVERED";
+  createdAt: string;
+  paymentRail: "Stripe" | "Shopify Checkout" | "Direct Card";
+}
+
+// -------------------------------------------------------------
+// NOVA AGENT CHAT & ARTIFACT TYPES (MCP & AGENTS.md)
+// -------------------------------------------------------------
+export type AgentMessageType = "user" | "assistant" | "system" | "tool_call" | "tool_result";
+
+export interface NovaToolCall {
+  id: string;
+  toolName: string;
+  parameters: Record<string, any>;
+  result?: Record<string, any> | string;
+  status: "executing" | "completed" | "failed";
+}
+
+export interface NovaArtifact {
+  id: string;
+  title: string;
+  type: "code" | "landing_page" | "markdown_report" | "json_schema" | "live_preview";
+  content: string;
+  language?: string;
+  createdAt: string;
+}
+
+export interface NovaChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: string;
+  toolCalls?: NovaToolCall[];
+  artifactIds?: string[];
+  streaming?: boolean;
+}
 
 // -------------------------------------------------------------
 // SHIPWORTHY TESTING & CERTIFICATION ENGINE TYPES
