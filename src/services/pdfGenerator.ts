@@ -351,7 +351,22 @@ export function generateAuditPdfReport({
     pillar.checks.forEach((chk) => {
       const isCheckedManually = !!manualChecks[chk.id];
       const effectiveStatus: CheckStatus = isCheckedManually ? "PASSED" : chk.status;
-      const checkCardHeight = chk.patchCode ? 66 : 48;
+      
+      // Calculate dynamic text lines
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      const descLines = doc.splitTextToSize(chk.description, contentWidth - 36);
+      
+      doc.setFont("helvetica", "italic");
+      const fixLines = doc.splitTextToSize(`Fix / Verification: ${chk.recommendedFix}`, contentWidth - 36);
+      
+      const hasPatch = !!chk.patchCode;
+      const patchLineCount = hasPatch ? 1 : 0;
+      
+      const checkCardHeight = Math.max(
+        50,
+        22 + descLines.length * 10 + fixLines.length * 10 + (hasPatch ? 18 : 0)
+      );
 
       checkPageBreak(checkCardHeight + 6);
 
@@ -375,25 +390,27 @@ export function generateAuditPdfReport({
       );
 
       doc.setTextColor(15, 23, 42);
-      doc.text(chk.name, margin + 85, currentY + 14);
+      const titleLines = doc.splitTextToSize(chk.name, contentWidth - 150);
+      doc.text(titleLines[0], margin + 95, currentY + 14);
 
+      let textCursorY = currentY + 26;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7.5);
       doc.setTextColor(71, 85, 105);
-      const descLines = doc.splitTextToSize(chk.description, contentWidth - 36);
-      doc.text(descLines[0], margin + 14, currentY + 26);
+      doc.text(descLines, margin + 14, textCursorY);
+      textCursorY += descLines.length * 10;
 
       doc.setFont("helvetica", "italic");
       doc.setTextColor(15, 23, 42);
-      const fixLines = doc.splitTextToSize(`Fix: ${chk.recommendedFix}`, contentWidth - 36);
-      doc.text(fixLines[0], margin + 14, currentY + 38);
+      doc.text(fixLines, margin + 14, textCursorY);
+      textCursorY += fixLines.length * 10;
 
       if (chk.patchCode) {
         doc.setFont("courier", "normal");
         doc.setFontSize(6.5);
         doc.setTextColor(16, 185, 129);
-        const codeClean = chk.patchCode.replace(/\n/g, " ").slice(0, 95);
-        doc.text(`Patch: ${codeClean}...`, margin + 14, currentY + 54);
+        const codeClean = chk.patchCode.replace(/\s+/g, " ").slice(0, 105);
+        doc.text(`Patch: ${codeClean}...`, margin + 14, textCursorY + 2);
       }
 
       currentY += checkCardHeight + 6;
