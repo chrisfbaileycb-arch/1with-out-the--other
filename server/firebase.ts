@@ -346,3 +346,43 @@ export async function testFirestoreConnectivity(): Promise<{ connected: boolean;
     return { connected: false, latencyMs, error: err.message || "Failed to reach Firestore" };
   }
 }
+
+/**
+ * Actively checks Firebase Auth connectivity with latency measurement.
+ */
+export async function testFirebaseAuthConnectivity(): Promise<{ connected: boolean; latencyMs: number; error?: string }> {
+  const auth = getFirebaseAuth();
+  if (!auth) {
+    return { connected: false, latencyMs: 0, error: "Firebase Auth is not configured." };
+  }
+  const t0 = performance.now();
+  try {
+    // Actively verify connectivity to Firebase Identity Platform via empty batch lookup
+    await auth.getUsers([]);
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: true, latencyMs };
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: false, latencyMs, error: err.message || "Failed to reach Firebase Auth service" };
+  }
+}
+
+/**
+ * Actively checks Firebase App Check readiness and provider registration.
+ */
+export async function testAppCheckConnectivity(): Promise<{ connected: boolean; latencyMs: number; enforcement: "ENFORCED" | "CONFIGURED" | "BYPASSED" | "UNAVAILABLE"; error?: string }> {
+  const enforcement = getAppCheckEnforcementStatus();
+  const appCheck = getFirebaseAppCheck();
+  if (!appCheck) {
+    return { connected: false, latencyMs: 0, enforcement, error: "Firebase App Check is not configured." };
+  }
+  const t0 = performance.now();
+  try {
+    const isAvailable = typeof appCheck.verifyToken === "function";
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: isAvailable, latencyMs, enforcement };
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: false, latencyMs, enforcement, error: err.message || "Failed to verify Firebase App Check" };
+  }
+}

@@ -251,3 +251,18 @@ export async function fetchOperatorSession(): Promise<{ authenticated: boolean; 
     return { authenticated: false };
   }
 }
+
+export async function fetchSubsystemReadiness(): Promise<import("../types").SubsystemReadinessReport | null> {
+  try {
+    const res = await fetch("/api/readiness", {
+      method: "GET",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    // Even on 503 (FAILED status), the JSON payload is returned with detailed diagnostics
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+

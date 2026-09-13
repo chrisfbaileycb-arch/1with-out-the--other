@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { DefenseScanResult, SecurityClearance, AuditEventItem, ReadinessSuiteItem } from "../types";
+import { DefenseScanResult, SecurityClearance, AuditEventItem, ReadinessSuiteItem, SubsystemReadinessReport } from "../types";
 import {
   scanDefenseSafety,
   authorizeDefensePasscode,
   fetchAuditLogs,
   runDeploymentReadiness,
   fetchLatestReadiness,
+  fetchSubsystemReadiness,
   loginOperator,
   logoutOperator,
   fetchOperatorSession,
@@ -62,6 +63,7 @@ export const DefenseGateView: React.FC<DefenseGateViewProps> = ({
 
   // Deployment Readiness State
   const [readinessSuite, setReadinessSuite] = useState<ReadinessSuiteItem | null>(null);
+  const [subsystemReport, setSubsystemReport] = useState<SubsystemReadinessReport | null>(null);
   const [isRunningReadiness, setIsRunningReadiness] = useState<boolean>(false);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -82,6 +84,9 @@ export const DefenseGateView: React.FC<DefenseGateViewProps> = ({
     fetchOperatorSession().then((s) => setOperatorSession(s));
     fetchLatestReadiness().then((s) => {
       if (s) setReadinessSuite(s);
+    });
+    fetchSubsystemReadiness().then((r) => {
+      if (r) setSubsystemReport(r);
     });
   }, []);
 
@@ -129,8 +134,12 @@ export const DefenseGateView: React.FC<DefenseGateViewProps> = ({
     setIsRunningReadiness(true);
     setReadinessError(null);
     try {
-      const suite = await runDeploymentReadiness();
+      const [suite, report] = await Promise.all([
+        runDeploymentReadiness(),
+        fetchSubsystemReadiness(),
+      ]);
       setReadinessSuite(suite);
+      if (report) setSubsystemReport(report);
     } catch (err: any) {
       setReadinessError(err.message || "Readiness check failed");
     } finally {
@@ -590,6 +599,93 @@ export const DefenseGateView: React.FC<DefenseGateViewProps> = ({
               <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-400 flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
                 <span>{readinessError}</span>
+              </div>
+            )}
+
+            {/* Live Backend & Firebase Service Connectivity Diagnostic (/api/readiness) */}
+            {subsystemReport && (
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                      Backend & Firebase Service Connectivity Diagnostic (/api/readiness)
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">Overall:</span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        subsystemReport.status === "READY"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                          : subsystemReport.status === "DEGRADED"
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                          : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                      }`}
+                    >
+                      {subsystemReport.status}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      ({subsystemReport.summary.verified} Verified, {subsystemReport.summary.configured} Configured,{" "}
+                      {subsystemReport.summary.degraded} Degraded, {subsystemReport.summary.failed} Failed)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {[
+                    { key: "firestore", name: "Cloud Firestore Database" },
+                    { key: "firebaseAuth", name: "Firebase Authentication" },
+                    { key: "firebaseAppCheck", name: "Firebase App Check" },
+                    { key: "firebaseAdmin", name: "Firebase Admin SDK Core" },
+                    { key: "sessionPersistence", name: "Session Persistence Store" },
+                    { key: "clearancePersistence", name: "Clearance Persistence Store" },
+                    { key: "rateLimitPersistence", name: "Rate-Limit Persistence Store" },
+                    { key: "auditPersistence", name: "Audit Trail Persistence Store" },
+                    { key: "gemini", name: "Gemini AI Engine Service" },
+                  ].map(({ key, name }) => {
+                    const dep = subsystemReport.subsystems[key];
+                    if (!dep) return null;
+                    const statusColor =
+                      dep.status === "VERIFIED"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        : dep.status === "CONFIGURED"
+                        ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/30"
+                        : dep.status === "DEGRADED"
+                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                        : "bg-rose-500/10 text-rose-400 border-rose-500/30";
+
+                    return (
+                      <div
+                        key={key}
+                        className="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-200">{name}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${statusColor}`}>
+                            {dep.status}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                          <span>{dep.backend || dep.mode || dep.enforcement || "service"}</span>
+                          {dep.latencyMs !== undefined && dep.latencyMs > 0 && (
+                            <span>{dep.latencyMs}ms</span>
+                          )}
+                        </div>
+                        {dep.error && (
+                          <div className="text-[10px] text-rose-400 font-mono line-clamp-2">
+                            {dep.error}
+                          </div>
+                        )}
+                        {dep.details?.reason && (
+                          <div className="text-[10px] text-slate-500 italic">
+                            {dep.details.reason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

@@ -516,3 +516,41 @@ export interface ReadinessSuiteItem {
     skipped: number;
   };
 }
+
+export type DependencyReadinessState = "VERIFIED" | "CONFIGURED" | "DEGRADED" | "FAILED";
+
+export interface DependencyStatusItem {
+  status: DependencyReadinessState;
+  verified: boolean;
+  mode?: string;
+  backend?: string;
+  latencyMs?: number;
+  error?: string | null;
+  enforcement?: string;
+  details?: Record<string, any>;
+}
+
+export interface SubsystemReadinessReport {
+  status: "READY" | "DEGRADED" | "FAILED";
+  timestamp: string;
+  summary: {
+    totalDependencies: number;
+    verified: number;
+    configured: number;
+    degraded: number;
+    failed: number;
+  };
+  subsystems: {
+    firebaseAdmin: DependencyStatusItem;
+    firestore: DependencyStatusItem;
+    firebaseAuth: DependencyStatusItem;
+    firebaseAppCheck: DependencyStatusItem;
+    sessionPersistence: DependencyStatusItem;
+    clearancePersistence: DependencyStatusItem;
+    rateLimitPersistence: DependencyStatusItem;
+    auditPersistence: DependencyStatusItem;
+    gemini: DependencyStatusItem;
+    [key: string]: DependencyStatusItem;
+  };
+}
+

@@ -390,23 +390,73 @@ describe("Production Durability: Restart-Safety & Multi-Instance Synchronization
     expect(report).toBeDefined();
     expect(["READY", "DEGRADED", "FAILED"]).toContain(report.status);
 
+    const allowedStatuses = ["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED"];
+
+    // Explicit verification of Firebase/Firestore dependencies
     const subsystems = report.subsystems;
     expect(subsystems.firebaseAdmin).toBeDefined();
-    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.firebaseAdmin.status);
+    expect(allowedStatuses).toContain(subsystems.firebaseAdmin.status);
 
-    expect(subsystems.sessionPersistenceReachable).toBeDefined();
-    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.sessionPersistenceReachable.status);
+    expect(subsystems.firestore).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.firestore.status);
+    expect(subsystems.firestoreReachable).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.firestoreReachable.status);
 
-    expect(subsystems.clearancePersistenceReachable).toBeDefined();
-    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.clearancePersistenceReachable.status);
+    expect(subsystems.firebaseAuth).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.firebaseAuth.status);
 
-    expect(subsystems.rateLimitPersistenceReachable).toBeDefined();
-    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.rateLimitPersistenceReachable.status);
+    expect(subsystems.firebaseAppCheck).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.firebaseAppCheck.status);
 
-    expect(subsystems.auditPersistenceReachable).toBeDefined();
-    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.auditPersistenceReachable.status);
+    // Persistence dependencies
+    expect(subsystems.sessionPersistence).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.sessionPersistence.status);
 
-    expect(subsystems.geminiConfigured).toBeDefined();
-    expect(subsystems.appCheckStatus).toBeDefined();
+    expect(subsystems.clearancePersistence).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.clearancePersistence.status);
+
+    expect(subsystems.rateLimitPersistence).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.rateLimitPersistence.status);
+
+    expect(subsystems.auditPersistence).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.auditPersistence.status);
+
+    expect(subsystems.gemini).toBeDefined();
+    expect(allowedStatuses).toContain(subsystems.gemini.status);
+
+    // Summary counts integrity
+    expect(report.summary).toBeDefined();
+    expect(report.summary.totalDependencies).toBe(9);
+    expect(
+      report.summary.verified +
+        report.summary.configured +
+        report.summary.degraded +
+        report.summary.failed
+    ).toBe(9);
   });
+
+  it("explicitly verifies connectivity helpers for Firebase services", async () => {
+    const {
+      testFirestoreConnectivity,
+      testFirebaseAuthConnectivity,
+      testAppCheckConnectivity,
+    } = await import("./firebase");
+
+    const firestoreResult = await testFirestoreConnectivity();
+    expect(firestoreResult).toBeDefined();
+    expect(typeof firestoreResult.connected).toBe("boolean");
+    expect(typeof firestoreResult.latencyMs).toBe("number");
+
+    const authResult = await testFirebaseAuthConnectivity();
+    expect(authResult).toBeDefined();
+    expect(typeof authResult.connected).toBe("boolean");
+    expect(typeof authResult.latencyMs).toBe("number");
+
+    const appCheckResult = await testAppCheckConnectivity();
+    expect(appCheckResult).toBeDefined();
+    expect(typeof appCheckResult.connected).toBe("boolean");
+    expect(typeof appCheckResult.latencyMs).toBe("number");
+    expect(["ENFORCED", "CONFIGURED", "BYPASSED", "UNAVAILABLE"]).toContain(appCheckResult.enforcement);
+  });
+
 });

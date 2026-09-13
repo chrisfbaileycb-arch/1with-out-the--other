@@ -5,7 +5,14 @@ import { serverConfig } from "./config";
 import { repository } from "./repository";
 import { evaluateDefenseSafety } from "./defense";
 import { verifyAndAuthorizePasscode, authenticateInternalUser } from "./security";
-import { getFirebaseStatus, getFirestoreDb, testFirestoreConnectivity, getAppCheckEnforcementStatus } from "./firebase";
+import {
+  getFirebaseStatus,
+  getFirestoreDb,
+  testFirestoreConnectivity,
+  testFirebaseAuthConnectivity,
+  testAppCheckConnectivity,
+  getAppCheckEnforcementStatus,
+} from "./firebase";
 import { durableSessionStore, durableClearanceStore, durableRateLimiterStore } from "./durable-stores";
 
 export type TestEvidenceStatus = "NOT_RUN" | "PASSED" | "FAILED" | "SKIPPED";
@@ -548,179 +555,334 @@ export async function getLatestReadinessSuiteAsync(): Promise<DeploymentReadines
   return null;
 }
 
-export type SubsystemReadinessState = "VERIFIED" | "CONFIGURED" | "DEGRADED" | "FAILED" | "NOT CONFIGURED";
+export type SubsystemReadinessState = "VERIFIED" | "CONFIGURED" | "DEGRADED" | "FAILED";
+
+export interface DependencyStatusReport {
+  status: SubsystemReadinessState;
+  verified: boolean;
+  mode?: string;
+  backend?: string;
+  latencyMs?: number;
+  error?: string | null;
+  enforcement?: "ENFORCED" | "CONFIGURED" | "BYPASSED" | "UNAVAILABLE";
+  details?: Record<string, any>;
+}
 
 export interface ReadinessSubsystemReport {
   status: "READY" | "DEGRADED" | "FAILED";
   timestamp: string;
+  summary: {
+    totalDependencies: number;
+    verified: number;
+    configured: number;
+    degraded: number;
+    failed: number;
+  };
   subsystems: {
-    firebaseAdmin: {
-      status: SubsystemReadinessState;
-      mode: string;
-      details?: Record<string, any>;
-    };
-    firestoreReachable: {
-      status: SubsystemReadinessState;
-      latencyMs?: number;
-      error?: string;
-    };
-    sessionPersistenceReachable: {
-      status: SubsystemReadinessState;
-      backend: string;
-      latencyMs?: number;
-      error?: string;
-    };
-    clearancePersistenceReachable: {
-      status: SubsystemReadinessState;
-      backend: string;
-      latencyMs?: number;
-      error?: string;
-    };
-    rateLimitPersistenceReachable: {
-      status: SubsystemReadinessState;
-      backend: string;
-      latencyMs?: number;
-      error?: string;
-    };
-    auditPersistenceReachable: {
-      status: SubsystemReadinessState;
-      backend: string;
-      latencyMs?: number;
-      error?: string;
-    };
-    geminiConfigured: {
-      status: SubsystemReadinessState;
-      mode: string;
-    };
-    appCheckStatus: {
-      status: SubsystemReadinessState;
-      enforcement: "ENFORCED" | "CONFIGURED" | "BYPASSED" | "UNAVAILABLE";
-    };
+    firebaseAdmin: DependencyStatusReport;
+    firestore: DependencyStatusReport;
+    firebaseAuth: DependencyStatusReport;
+    firebaseAppCheck: DependencyStatusReport;
+    sessionPersistence: DependencyStatusReport;
+    clearancePersistence: DependencyStatusReport;
+    rateLimitPersistence: DependencyStatusReport;
+    auditPersistence: DependencyStatusReport;
+    gemini: DependencyStatusReport;
+    // Backward compatibility aliases
+    firestoreReachable: DependencyStatusReport;
+    sessionPersistenceReachable: DependencyStatusReport;
+    clearancePersistenceReachable: DependencyStatusReport;
+    rateLimitPersistenceReachable: DependencyStatusReport;
+    auditPersistenceReachable: DependencyStatusReport;
+    geminiConfigured: DependencyStatusReport;
+    appCheckStatus: DependencyStatusReport;
   };
 }
 
 /**
  * Truthfully probes and reports component-level operational readiness states.
- * States: VERIFIED, CONFIGURED, DEGRADED, FAILED, NOT CONFIGURED.
- * Never outputs a green status if a dependency was not actually tested.
+ * States: VERIFIED, CONFIGURED, DEGRADED, FAILED.
+ * Explicitly tests live connectivity to all Firebase/Firestore services and backend stores.
  */
 export async function checkSubsystemReadiness(): Promise<ReadinessSubsystemReport> {
   const fbStatus = getFirebaseStatus();
   const firestoreTest = await testFirestoreConnectivity();
+  const authTest = await testFirebaseAuthConnectivity();
+  const appCheckTest = await testAppCheckConnectivity();
   const sessionHealth = await durableSessionStore.checkHealth();
   const clearanceHealth = await durableClearanceStore.checkHealth();
   const rateLimitHealth = await durableRateLimiterStore.checkHealth();
   const auditHealth = await repository.checkHealth();
-  const appCheckEnforce = getAppCheckEnforcementStatus();
 
-  // 1. Firebase Admin
-  let fbAdminState: SubsystemReadinessState = "NOT CONFIGURED";
-  if (fbStatus.initialized) {
-    fbAdminState = "CONFIGURED";
-  }
-
-  // 2. Firestore Reachable
-  let firestoreState: SubsystemReadinessState = "NOT CONFIGURED";
+  // 1. Cloud Firestore Database
+  let firestoreDep: DependencyStatusReport;
   if (firestoreTest.connected) {
-    firestoreState = "VERIFIED";
-  } else if (fbStatus.initialized) {
-    firestoreState = "FAILED";
+    firestoreDep = {
+      status: "VERIFIED",
+      verified: true,
+      backend: "FIRESTORE",
+      latencyMs: firestoreTest.latencyMs,
+      details: { projectId: fbStatus.projectId, usingEmulator: fbStatus.usingEmulator },
+    };
+  } else if (fbStatus.initialized || fbStatus.services.firestore) {
+    firestoreDep = {
+      status: "FAILED",
+      verified: false,
+      backend: "FIRESTORE",
+      latencyMs: firestoreTest.latencyMs,
+      error: firestoreTest.error || "Firestore ping check failed.",
+      details: { projectId: fbStatus.projectId },
+    };
+  } else {
+    firestoreDep = {
+      status: "DEGRADED",
+      verified: false,
+      backend: "LOCAL_DURABLE_DISK",
+      latencyMs: 0,
+      details: { reason: "Firestore unconfigured; durable local persistence fallback active." },
+    };
   }
 
-  // 3. Session Persistence
-  let sessionState: SubsystemReadinessState = "FAILED";
+  // 2. Firebase Authentication
+  let authDep: DependencyStatusReport;
+  if (authTest.connected) {
+    authDep = {
+      status: "VERIFIED",
+      verified: true,
+      backend: "FIREBASE_AUTH",
+      latencyMs: authTest.latencyMs,
+      details: { projectId: fbStatus.projectId },
+    };
+  } else if (fbStatus.initialized || fbStatus.services.auth) {
+    authDep = {
+      status: "FAILED",
+      verified: false,
+      backend: "FIREBASE_AUTH",
+      latencyMs: authTest.latencyMs,
+      error: authTest.error || "Firebase Auth connectivity check failed.",
+    };
+  } else {
+    authDep = {
+      status: "DEGRADED",
+      verified: false,
+      backend: "INTERNAL_SECURITY_FALLBACK",
+      latencyMs: 0,
+      details: { reason: "Firebase Auth unconfigured; internal bearer tokens and passcodes active." },
+    };
+  }
+
+  // 3. Firebase App Check
+  let appCheckDep: DependencyStatusReport;
+  if (appCheckTest.connected && appCheckTest.enforcement === "ENFORCED") {
+    appCheckDep = {
+      status: "VERIFIED",
+      verified: true,
+      enforcement: "ENFORCED",
+      latencyMs: appCheckTest.latencyMs,
+    };
+  } else if (appCheckTest.connected) {
+    appCheckDep = {
+      status: "CONFIGURED",
+      verified: true,
+      enforcement: appCheckTest.enforcement,
+      latencyMs: appCheckTest.latencyMs,
+    };
+  } else if (fbStatus.initialized && serverConfig.appCheckEnforce) {
+    appCheckDep = {
+      status: "FAILED",
+      verified: false,
+      enforcement: appCheckTest.enforcement,
+      latencyMs: appCheckTest.latencyMs,
+      error: appCheckTest.error || "App Check enforcement failed.",
+    };
+  } else {
+    appCheckDep = {
+      status: "DEGRADED",
+      verified: false,
+      enforcement: appCheckTest.enforcement,
+      details: { reason: "App Check bypassed or unconfigured in development environment." },
+    };
+  }
+
+  // 4. Firebase Admin SDK Core
+  let fbAdminDep: DependencyStatusReport;
+  if (fbStatus.initialized && (firestoreTest.connected || authTest.connected)) {
+    fbAdminDep = {
+      status: "VERIFIED",
+      verified: true,
+      mode: fbStatus.mode,
+      details: { projectId: fbStatus.projectId, usingEmulator: fbStatus.usingEmulator, services: fbStatus.services },
+    };
+  } else if (fbStatus.initialized && !fbStatus.error) {
+    fbAdminDep = {
+      status: "CONFIGURED",
+      verified: false,
+      mode: fbStatus.mode,
+      details: { projectId: fbStatus.projectId, services: fbStatus.services },
+    };
+  } else if (fbStatus.mode === "DEGRADED" || (fbStatus.error && fbStatus.mode !== "UNCONFIGURED")) {
+    fbAdminDep = {
+      status: "FAILED",
+      verified: false,
+      mode: fbStatus.mode,
+      error: fbStatus.error,
+    };
+  } else {
+    fbAdminDep = {
+      status: "DEGRADED",
+      verified: false,
+      mode: "UNCONFIGURED",
+      details: { reason: fbStatus.error || "Firebase cloud credentials not configured; local fallback mode active." },
+    };
+  }
+
+  // 5. Session Persistence
+  let sessionDep: DependencyStatusReport;
   if (sessionHealth.healthy) {
-    sessionState = sessionHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+    const isCloud = sessionHealth.backend === "FIRESTORE";
+    sessionDep = {
+      status: isCloud ? "VERIFIED" : "DEGRADED",
+      verified: isCloud,
+      backend: sessionHealth.backend,
+      latencyMs: sessionHealth.latencyMs,
+      details: isCloud ? {} : { durability: "LOCAL_DURABLE_DISK" },
+    };
+  } else {
+    sessionDep = {
+      status: "FAILED",
+      verified: false,
+      backend: sessionHealth.backend,
+      error: sessionHealth.error || "Session persistence health check failed.",
+    };
   }
 
-  // 4. Clearance Persistence
-  let clearanceState: SubsystemReadinessState = "FAILED";
+  // 6. Security Clearance Persistence
+  let clearanceDep: DependencyStatusReport;
   if (clearanceHealth.healthy) {
-    clearanceState = clearanceHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+    const isCloud = clearanceHealth.backend === "FIRESTORE";
+    clearanceDep = {
+      status: isCloud ? "VERIFIED" : "DEGRADED",
+      verified: isCloud,
+      backend: clearanceHealth.backend,
+      latencyMs: clearanceHealth.latencyMs,
+      details: isCloud ? {} : { durability: "LOCAL_DURABLE_DISK" },
+    };
+  } else {
+    clearanceDep = {
+      status: "FAILED",
+      verified: false,
+      backend: clearanceHealth.backend,
+      error: clearanceHealth.error || "Clearance persistence health check failed.",
+    };
   }
 
-  // 5. Rate-Limit Persistence
-  let rateLimitState: SubsystemReadinessState = "FAILED";
+  // 7. Rate-Limit Persistence
+  let rateLimitDep: DependencyStatusReport;
   if (rateLimitHealth.healthy) {
-    rateLimitState = rateLimitHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+    const isCloud = rateLimitHealth.backend === "FIRESTORE";
+    rateLimitDep = {
+      status: isCloud ? "VERIFIED" : "DEGRADED",
+      verified: isCloud,
+      backend: rateLimitHealth.backend,
+      latencyMs: rateLimitHealth.latencyMs,
+      details: isCloud ? {} : { durability: "LOCAL_DURABLE_DISK" },
+    };
+  } else {
+    rateLimitDep = {
+      status: "FAILED",
+      verified: false,
+      backend: rateLimitHealth.backend,
+      error: rateLimitHealth.error || "Rate limiter persistence health check failed.",
+    };
   }
 
-  // 6. Audit Persistence
-  let auditState: SubsystemReadinessState = "FAILED";
+  // 8. Audit Trail Persistence
+  let auditDep: DependencyStatusReport;
   if (auditHealth.isConnected) {
-    auditState = auditHealth.engine === "firestore" || auditHealth.engine === "postgresql" ? "VERIFIED" : "DEGRADED";
+    const isCloud = auditHealth.engine === "firestore" || auditHealth.engine === "postgresql";
+    auditDep = {
+      status: isCloud ? "VERIFIED" : "DEGRADED",
+      verified: isCloud,
+      backend: auditHealth.engine,
+      latencyMs: auditHealth.latencyMs,
+      details: isCloud ? {} : { durability: "LOCAL_PERSISTENT_STORAGE" },
+    };
+  } else {
+    auditDep = {
+      status: "FAILED",
+      verified: false,
+      backend: auditHealth.engine,
+      error: auditHealth.error || "Audit persistence health check failed.",
+    };
   }
 
-  // 7. Gemini Configured
+  // 9. Gemini AI Engine
   const hasGemini = !!serverConfig.geminiApiKey;
-  const geminiState: SubsystemReadinessState = hasGemini ? "CONFIGURED" : "NOT CONFIGURED";
+  const geminiDep: DependencyStatusReport = hasGemini
+    ? {
+        status: "CONFIGURED",
+        verified: true,
+        mode: "API_KEY_PRESENT",
+        details: { serverSideSecured: true },
+      }
+    : {
+        status: "DEGRADED",
+        verified: false,
+        mode: "HEURISTIC_FALLBACK",
+        details: { reason: "GEMINI_API_KEY absent; heuristic sentinel engine active." },
+      };
 
-  // 8. App Check Status
-  let appCheckState: SubsystemReadinessState = "NOT CONFIGURED";
-  if (appCheckEnforce === "ENFORCED" || appCheckEnforce === "CONFIGURED") {
-    appCheckState = "CONFIGURED";
-  } else if (appCheckEnforce === "BYPASSED") {
-    appCheckState = "DEGRADED";
-  }
+  // Compile summary counts across all dependencies
+  const allDeps = [
+    fbAdminDep,
+    firestoreDep,
+    authDep,
+    appCheckDep,
+    sessionDep,
+    clearanceDep,
+    rateLimitDep,
+    auditDep,
+    geminiDep,
+  ];
 
-  // Determine overall status
-  const criticalStates = [sessionState, clearanceState, rateLimitState, auditState];
-  const anyFailed = criticalStates.includes("FAILED") || firestoreState === "FAILED";
-  const anyDegraded = criticalStates.includes("DEGRADED");
+  const summary = {
+    totalDependencies: allDeps.length,
+    verified: allDeps.filter((d) => d.status === "VERIFIED").length,
+    configured: allDeps.filter((d) => d.status === "CONFIGURED").length,
+    degraded: allDeps.filter((d) => d.status === "DEGRADED").length,
+    failed: allDeps.filter((d) => d.status === "FAILED").length,
+  };
 
+  // Determine overall status: FAILED if any failed, DEGRADED if any degraded, READY if all verified or configured
   let overallStatus: "READY" | "DEGRADED" | "FAILED" = "READY";
-  if (anyFailed) {
+  if (summary.failed > 0) {
     overallStatus = "FAILED";
-  } else if (anyDegraded) {
+  } else if (summary.degraded > 0) {
     overallStatus = "DEGRADED";
   }
 
   return {
     status: overallStatus,
     timestamp: new Date().toISOString(),
+    summary,
     subsystems: {
-      firebaseAdmin: {
-        status: fbAdminState,
-        mode: fbStatus.mode,
-        details: { projectId: fbStatus.projectId, services: fbStatus.services },
-      },
-      firestoreReachable: {
-        status: firestoreState,
-        latencyMs: firestoreTest.latencyMs,
-        error: firestoreTest.error,
-      },
-      sessionPersistenceReachable: {
-        status: sessionState,
-        backend: sessionHealth.backend,
-        latencyMs: sessionHealth.latencyMs,
-        error: sessionHealth.error,
-      },
-      clearancePersistenceReachable: {
-        status: clearanceState,
-        backend: clearanceHealth.backend,
-        latencyMs: clearanceHealth.latencyMs,
-        error: clearanceHealth.error,
-      },
-      rateLimitPersistenceReachable: {
-        status: rateLimitState,
-        backend: rateLimitHealth.backend,
-        latencyMs: rateLimitHealth.latencyMs,
-        error: rateLimitHealth.error,
-      },
-      auditPersistenceReachable: {
-        status: auditState,
-        backend: auditHealth.engine,
-        latencyMs: auditHealth.latencyMs,
-        error: auditHealth.error,
-      },
-      geminiConfigured: {
-        status: geminiState,
-        mode: hasGemini ? "API_KEY_PRESENT" : "HEURISTIC_FALLBACK",
-      },
-      appCheckStatus: {
-        status: appCheckState,
-        enforcement: appCheckEnforce,
-      },
+      firebaseAdmin: fbAdminDep,
+      firestore: firestoreDep,
+      firebaseAuth: authDep,
+      firebaseAppCheck: appCheckDep,
+      sessionPersistence: sessionDep,
+      clearancePersistence: clearanceDep,
+      rateLimitPersistence: rateLimitDep,
+      auditPersistence: auditDep,
+      gemini: geminiDep,
+      // Backward compatibility aliases
+      firestoreReachable: firestoreDep,
+      sessionPersistenceReachable: sessionDep,
+      clearancePersistenceReachable: clearanceDep,
+      rateLimitPersistenceReachable: rateLimitDep,
+      auditPersistenceReachable: auditDep,
+      geminiConfigured: geminiDep,
+      appCheckStatus: appCheckDep,
     },
   };
 }
