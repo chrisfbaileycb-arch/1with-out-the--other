@@ -1,0 +1,32 @@
+[
+  {
+    "key": "passcode:127_0_0_1",
+    "count": 6,
+    "resetAt": 1789281460243,
+    "updatedAt": "2026-09-13T06:24:56.535Z"
+  },
+  {
+    "key": "passcode:192_168_1_100",
+    "count": 4,
+    "resetAt": 1789281460245,
+    "updatedAt": "2026-09-13T06:25:17.919Z"
+  },
+  {
+    "key": "login:unknown",
+    "count": 8,
+    "resetAt": 1789281460252,
+    "updatedAt": "2026-09-13T06:25:17.925Z"
+  },
+  {
+    "key": "api:127_0_0_1",
+    "count": 3,
+    "resetAt": 1789280749303,
+    "updatedAt": "2026-09-13T06:24:52.332Z"
+  },
+  {
+    "key": "test-limit-b91e48ba8395",
+    "count": 1,
+    "resetAt": 1789280727943,
+    "updatedAt": "2026-09-13T06:25:17.943Z"
+  }
+]

@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
 import { Pool } from "pg";
+import type { Firestore } from "firebase-admin/firestore";
 import { serverConfig } from "./config";
+import { getFirestoreDb, getFirebaseStatus } from "./firebase";
 
 export interface StoredAuditEvent {
   id: string;
@@ -219,7 +221,136 @@ class LocalFileRepository implements DataRepository {
   }
 }
 
-// ─── PostgreSQL Data Repository ─────────────────────────────────────────────
+// ─── Cloud Firestore Data Repository (Primary Managed Backend) ─────────────
+export class FirestoreRepository implements DataRepository {
+  private db: Firestore;
+  private fallback: LocalFileRepository;
+
+  constructor(db: Firestore) {
+    this.db = db;
+    this.fallback = new LocalFileRepository();
+  }
+
+  async saveAuditEvent(event: StoredAuditEvent): Promise<void> {
+    await this.fallback.saveAuditEvent(event);
+    try {
+      await this.db.collection("audit_logs").doc(event.id).set({
+        ...event,
+        timestamp: new Date(event.createdAt).getTime(),
+      });
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to persist audit event (persisted locally):", err);
+    }
+  }
+
+  async getAuditEvents(limit: number = 50, offset: number = 0): Promise<StoredAuditEvent[]> {
+    try {
+      const snap = await this.db
+        .collection("audit_logs")
+        .orderBy("createdAt", "desc")
+        .limit(limit + offset)
+        .get();
+
+      if (!snap.empty) {
+        const all = snap.docs.map((doc) => doc.data() as StoredAuditEvent);
+        return all.slice(offset, offset + limit);
+      }
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Error fetching audit logs from Firestore, reading from fallback:", err);
+    }
+    return this.fallback.getAuditEvents(limit, offset);
+  }
+
+  async saveAuthorizationEvent(event: StoredAuthorizationEvent): Promise<void> {
+    await this.fallback.saveAuthorizationEvent(event);
+    try {
+      await this.db.collection("authorization_events").doc(event.id).set(event);
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to persist authorization event:", err);
+    }
+  }
+
+  async saveDefenseScan(scan: StoredDefenseScan): Promise<void> {
+    await this.fallback.saveDefenseScan(scan);
+    try {
+      await this.db.collection("defense_scans").doc(scan.id).set(scan);
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to persist defense scan:", err);
+    }
+  }
+
+  async saveDiscernmentReport(report: StoredDiscernment): Promise<void> {
+    await this.fallback.saveDiscernmentReport(report);
+    try {
+      await this.db.collection("discernment_reports").doc(report.id).set(report);
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to persist discernment report:", err);
+    }
+  }
+
+  async saveTestRun(testRun: StoredTestRun): Promise<void> {
+    await this.fallback.saveTestRun(testRun);
+    try {
+      await this.db.collection("readiness_history").doc(testRun.id).set(testRun);
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to persist test run to readiness_history:", err);
+    }
+  }
+
+  async getLatestTestRuns(limit: number = 10): Promise<StoredTestRun[]> {
+    try {
+      const snap = await this.db
+        .collection("readiness_history")
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+
+      if (!snap.empty) {
+        return snap.docs.map((d) => d.data() as StoredTestRun);
+      }
+    } catch (err) {
+      console.warn("[1WithOut Firestore] Failed to query readiness history, using fallback:", err);
+    }
+    return this.fallback.getLatestTestRuns(limit);
+  }
+
+  async checkHealth(): Promise<{ isConnected: boolean; engine: string; latencyMs: number; error?: string }> {
+    const t0 = performance.now();
+    try {
+      await this.db.collection("_health").doc("ping").get();
+      const latency = Math.round(performance.now() - t0);
+      return {
+        isConnected: true,
+        engine: "cloud-firestore-admin",
+        latencyMs: latency,
+      };
+    } catch (err: any) {
+      const latency = Math.round(performance.now() - t0);
+      return {
+        isConnected: false,
+        engine: "cloud-firestore-admin",
+        latencyMs: latency,
+        error: err.message || "Firestore connection check failed",
+      };
+    }
+  }
+
+  async healthCheck(): Promise<{ healthy: boolean; mode: string; latencyMs: number; error?: string }> {
+    const health = await this.checkHealth();
+    return {
+      healthy: health.isConnected,
+      mode: health.isConnected ? "firestore-managed" : "fallback-local-json",
+      latencyMs: health.latencyMs,
+      error: health.error,
+    };
+  }
+
+  async close(): Promise<void> {
+    await this.fallback.close();
+  }
+}
+
+// ─── OPTIONAL SQL ADAPTER: PostgreSQL Data Repository ───────────────────────
 class PostgresRepository implements DataRepository {
   private pool: Pool;
   private fallback: LocalFileRepository;
@@ -515,9 +646,16 @@ class PostgresRepository implements DataRepository {
 
 // ─── Repository Factory ─────────────────────────────────────────────────────
 export function createDataRepository(): DataRepository {
+  const db = getFirestoreDb();
+  if (db) {
+    return new FirestoreRepository(db);
+  }
+
+  // OPTIONAL SQL ADAPTER: Retained for portability if PostgreSQL DATABASE_URL is configured
   if (serverConfig.databaseUrl && serverConfig.databaseUrl.trim()) {
     return new PostgresRepository(serverConfig.databaseUrl.trim());
   }
+
   return new LocalFileRepository();
 }
 

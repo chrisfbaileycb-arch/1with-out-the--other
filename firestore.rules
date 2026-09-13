@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1WithOut Master Engine - Production Firestore Security Rules
+    // Architecture: All privileged writes and reads are brokered server-side via the Firebase Admin SDK.
+    // Direct client SDK operations are restricted by default under zero-trust defense.
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOperator() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'operator' ||
+        request.auth.token.admin == true ||
+        request.auth.token.email.matches('.*@internal\\.1without\\.local$')
+      );
+    }
+
+    // Server-managed internal audit logs - strictly immutable, zero client write
+    match /audit_logs/{logId} {
+      allow read: if isOperator();
+      allow write: if false; // Only written server-side via Admin SDK
+    }
+
+    // Security clearance tokens and passcode event records
+    match /authorization_events/{eventId} {
+      allow read: if isOperator();
+      allow write: if false;
+    }
+
+    match /clearances/{clearanceId} {
+      allow read: if isOperator();
+      allow write: if false;
+    }
+
+    // Runtime operator sessions
+    match /sessions/{sessionId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.user || isOperator());
+      allow write: if false;
+    }
+
+    // Distributed rate limit counters
+    match /rate_limits/{limitKey} {
+      allow read, write: if false; // Server-only distributed transaction state
+    }
+
+    // Defense-of-break heuristic scan records
+    match /defense_scans/{scanId} {
+      allow read: if isOperator();
+      allow write: if false;
+    }
+
+    // Discernment assessment reports and findings
+    match /discernment_reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Brokered exclusively through /api/discern
+    }
+
+    // Production readiness test suites
+    match /readiness_history/{suiteId} {
+      allow read: if isOperator();
+      allow write: if false; // Only written by /api/admin/readiness/run via Admin SDK
+    }
+
+    // Default deny for all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

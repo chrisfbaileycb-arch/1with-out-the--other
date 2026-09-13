@@ -225,3 +225,91 @@ describe("Production Server Modules: Data Repository & Dual-Write Persistence", 
     expect(found?.action).toBe("SECURITY_TEST_AUDIT");
   });
 });
+
+describe("Production Server Modules: Durable Stores & Firebase Resilience", () => {
+  it("provides truthful Firebase runtime status diagnostics", async () => {
+    const { getFirebaseStatus } = await import("./firebase");
+    const status = getFirebaseStatus();
+    expect(status).toBeDefined();
+    expect(typeof status.initialized).toBe("boolean");
+    expect(["PRODUCTION", "EMULATOR", "UNCONFIGURED", "DEGRADED", "ERROR"]).toContain(status.mode);
+    expect(status.services).toBeDefined();
+    expect(typeof status.services.firestore).toBe("boolean");
+  });
+
+  it("manages durable session lifecycle across simulated restarts", async () => {
+    const { durableSessionStore } = await import("./durable-stores");
+    const testUser = `operator-${generateSecureToken(4)}`;
+
+    // Create session
+    const session = await durableSessionStore.createSession(testUser, "operator", 60000);
+    expect(session.sessionId).toBeDefined();
+    expect(session.user).toBe(testUser);
+    expect(session.role).toBe("operator");
+
+    // Retrieve session
+    const fetched = await durableSessionStore.getSession(session.sessionId);
+    expect(fetched).not.toBeNull();
+    expect(fetched?.user).toBe(testUser);
+
+    // Revoke session
+    await durableSessionStore.revokeSession(session.sessionId);
+    const revoked = await durableSessionStore.getSession(session.sessionId);
+    expect(revoked).toBeNull();
+  });
+
+  it("manages durable clearance tokens and enforces revocation", async () => {
+    const { durableClearanceStore } = await import("./durable-stores");
+    const testProject = "Compliance Audit Unit Alpha";
+
+    // Issue clearance
+    const { clearance, rawToken } = await durableClearanceStore.issueClearance({
+      projectName: testProject,
+      scope: "Full-Flight Testing",
+      durationMs: 60000,
+      operatorId: "unit-tester",
+    });
+
+    expect(clearance.clearanceId).toBeDefined();
+    expect(rawToken).toBeDefined();
+    expect(clearance.projectName).toBe(testProject);
+
+    // Validate clearance
+    const validated = await durableClearanceStore.validateClearance(rawToken);
+    expect(validated).not.toBeNull();
+    expect(validated?.projectName).toBe(testProject);
+
+    // Revoke clearance
+    await durableClearanceStore.revokeClearance(clearance.clearanceId);
+    const afterRevoke = await durableClearanceStore.validateClearance(rawToken);
+    expect(afterRevoke).toBeNull();
+  });
+
+  it("enforces distributed durable rate limiting boundaries", async () => {
+    const { durableRateLimiterStore } = await import("./durable-stores");
+    const testKey = `test-limit-${generateSecureToken(6)}`;
+
+    // Check boundary of 3 requests
+    const r1 = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
+    const r2 = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
+    const r3 = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
+    const r4 = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
+
+    expect(r1.allowed).toBe(true);
+    expect(r1.currentCount).toBe(1);
+    expect(r2.allowed).toBe(true);
+    expect(r2.currentCount).toBe(2);
+    expect(r3.allowed).toBe(true);
+    expect(r3.currentCount).toBe(3);
+
+    // 4th request must be locked out
+    expect(r4.allowed).toBe(false);
+    expect(r4.currentCount).toBe(4);
+
+    // Reset works
+    await durableRateLimiterStore.resetLimit(testKey);
+    const rAfterReset = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
+    expect(rAfterReset.allowed).toBe(true);
+    expect(rAfterReset.currentCount).toBe(1);
+  });
+});

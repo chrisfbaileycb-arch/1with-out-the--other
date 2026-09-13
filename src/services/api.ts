@@ -173,6 +173,7 @@ export async function processPipeline(
 export async function fetchAuditLogs(limit: number = 50, offset: number = 0): Promise<AuditEventItem[]> {
   const res = await fetch(`/api/admin/audit-logs?limit=${limit}&offset=${offset}`, {
     method: "GET",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
   });
 
@@ -188,6 +189,7 @@ export async function fetchAuditLogs(limit: number = 50, offset: number = 0): Pr
 export async function runDeploymentReadiness(): Promise<ReadinessSuiteItem> {
   const res = await fetch("/api/admin/readiness/run", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
   });
 
@@ -203,6 +205,7 @@ export async function runDeploymentReadiness(): Promise<ReadinessSuiteItem> {
 export async function fetchLatestReadiness(): Promise<ReadinessSuiteItem | null> {
   const res = await fetch("/api/admin/readiness/latest", {
     method: "GET",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
   });
 
@@ -214,6 +217,7 @@ export async function fetchLatestReadiness(): Promise<ReadinessSuiteItem | null>
 export async function loginOperator(username: string, password: string): Promise<{ success: boolean; user?: string; error?: string }> {
   const res = await fetch("/api/auth/login", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
@@ -229,6 +233,7 @@ export async function loginOperator(username: string, password: string): Promise
 export async function logoutOperator(): Promise<void> {
   await fetch("/api/auth/logout", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -237,6 +242,7 @@ export async function fetchOperatorSession(): Promise<{ authenticated: boolean; 
   try {
     const res = await fetch("/api/auth/session", {
       method: "GET",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) return { authenticated: false };

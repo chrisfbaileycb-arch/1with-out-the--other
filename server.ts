@@ -15,16 +15,19 @@ import {
   getActiveSession,
   apiRateLimiter,
   requireAuth,
+  requireOperatorAuth,
   enforceCsrfProtection,
 } from "./server/security";
 import { evaluateDefenseSafety } from "./server/defense";
 import { auditTrailMiddleware, recordAuditEvent } from "./server/audit";
-import { runDeploymentReadinessChecks, getLatestReadinessSuite } from "./server/readiness";
+import { runDeploymentReadinessChecks, getLatestReadinessSuite, getLatestReadinessSuiteAsync } from "./server/readiness";
+import { getFirebaseStatus, getFirebaseAppCheck, closeFirebase } from "./server/firebase";
+import { durableSessionStore } from "./server/durable-stores";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Security response headers
 app.use((req, res, next) => {
@@ -32,6 +35,30 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+// App Check defensive verification (defense-in-depth, non-blocking in development)
+app.use(async (req, res, next) => {
+  const appCheckToken = req.header("X-Firebase-AppCheck");
+  if (appCheckToken) {
+    const appCheck = getFirebaseAppCheck();
+    if (appCheck) {
+      try {
+        const claims = await appCheck.verifyToken(appCheckToken);
+        (req as any).appCheck = claims;
+      } catch (err: any) {
+        if (process.env.APP_CHECK_ENFORCE === "true" && process.env.NODE_ENV === "production") {
+          return res.status(401).json({
+            error: "Firebase App Check verification failed.",
+            code: "APP_CHECK_INVALID",
+            requestId: (req as any).id || "req-unknown",
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
   next();
 });
 
@@ -117,6 +144,54 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
+// 1b. API: Readiness Diagnostic (Truthful component-level operational states without secret leakage)
+app.get("/api/readiness", async (req, res) => {
+  const fbStatus = getFirebaseStatus();
+  const repoHealth = await repository.healthCheck();
+  const hasGemini = !!serverConfig.geminiApiKey;
+  const isAuthConfigured = !!serverConfig.internalAuthPasswordHash;
+
+  const isReady = repoHealth.healthy && isAuthConfigured;
+
+  res.status(isReady ? 200 : 503).json({
+    status: isReady ? "READY" : "DEGRADED",
+    timestamp: new Date().toISOString(),
+    subsystems: {
+      firebase: {
+        initialized: fbStatus.initialized,
+        mode: fbStatus.mode,
+        projectIdConfigured: !!fbStatus.projectId,
+        services: fbStatus.services,
+      },
+      persistence: {
+        mode: repoHealth.mode,
+        healthy: repoHealth.healthy,
+        latencyMs: repoHealth.latencyMs,
+      },
+      sessions: {
+        durable: true,
+        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
+      },
+      clearances: {
+        durable: true,
+        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
+      },
+      rateLimiter: {
+        durable: true,
+        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
+      },
+      gemini: {
+        configured: hasGemini,
+        mode: hasGemini ? "API_KEY_PRESENT" : "HEURISTIC_FALLBACK",
+      },
+      security: {
+        csrfEnforced: true,
+        defensePasscodesActive: serverConfig.defensePasscodes.length,
+      },
+    },
+  });
+});
+
 // 2. API: Defense-of-Break Heuristic Sentinel Scan (4-state decision)
 app.post("/api/defense/scan", async (req, res) => {
   try {
@@ -176,7 +251,8 @@ app.post("/api/defense/authorize-passcode", apiRateLimiter(15, 60000), async (re
 app.post("/api/auth/login", apiRateLimiter(10, 60000), async (req, res) => {
   try {
     const { username, password } = req.body;
-    const result = await authenticateInternalUser(username, password);
+    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+    const result = await authenticateInternalUser(username, password, clientIp);
     if (!result.success || !result.session) {
       return res.status(401).json({ success: false, error: result.error || "Authentication failed." });
     }
@@ -200,16 +276,16 @@ app.post("/api/auth/login", apiRateLimiter(10, 60000), async (req, res) => {
   }
 });
 
-app.post("/api/auth/logout", (req, res) => {
-  const sessionId = req.cookies?.["1without_session"];
-  if (sessionId) invalidateSession(sessionId);
+app.post("/api/auth/logout", async (req, res) => {
+  const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+  if (sessionId) await invalidateSession(sessionId);
   res.clearCookie("1without_session");
   return res.json({ success: true, message: "Session ended." });
 });
 
-app.get("/api/auth/session", (req, res) => {
+app.get("/api/auth/session", async (req, res) => {
   const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
-  const session = getActiveSession(sessionId);
+  const session = await durableSessionStore.getSession(sessionId);
   if (!session) {
     return res.json({ authenticated: false });
   }
@@ -221,8 +297,8 @@ app.get("/api/auth/session", (req, res) => {
   });
 });
 
-// 5. API: Internal Audit Logs (Read with pagination)
-app.get("/api/admin/audit-logs", async (req, res) => {
+// 5. API: Internal Audit Logs (Protected with Operator Authentication & Pagination)
+app.get("/api/admin/audit-logs", requireOperatorAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 100);
     const offset = parseInt(req.query.offset as string, 10) || 0;
@@ -233,10 +309,10 @@ app.get("/api/admin/audit-logs", async (req, res) => {
   }
 });
 
-// 6. API: Deployment & Runtime Readiness Checks
-app.post("/api/admin/readiness/run", async (req, res) => {
+// 6. API: Deployment & Runtime Readiness Checks (Protected with Operator Auth & Rate Limiting)
+app.post("/api/admin/readiness/run", requireOperatorAuth, apiRateLimiter(5, 60000, "admin:readiness"), async (req, res) => {
   try {
-    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+    const sessionId = (req as any).session?.sessionId || req.cookies?.["1without_session"];
     const suite = await runDeploymentReadinessChecks(sessionId);
     return res.json({ success: true, suite });
   } catch (err: any) {
@@ -244,9 +320,17 @@ app.post("/api/admin/readiness/run", async (req, res) => {
   }
 });
 
-app.get("/api/admin/readiness/latest", (req, res) => {
-  const suite = getLatestReadinessSuite();
+app.get("/api/admin/readiness/latest", requireOperatorAuth, async (req, res) => {
+  const suite = await getLatestReadinessSuiteAsync();
   return res.json({ suite });
+});
+
+// 6b. API: Admin Diagnostic Status & Session Overview
+app.get("/api/admin/firebase-status", requireOperatorAuth, (req, res) => {
+  return res.json({
+    firebase: getFirebaseStatus(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // 7. API: Claims & Opportunity Discernment Engine
@@ -1630,6 +1714,7 @@ async function startServer() {
     console.log(`[1WithOut] Received ${signal}. Shutting down gracefully...`);
     server.close(async () => {
       await repository.close();
+      await closeFirebase();
       process.exit(0);
     });
   };

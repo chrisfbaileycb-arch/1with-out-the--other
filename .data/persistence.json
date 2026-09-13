@@ -1,6 +1,90 @@
 {
   "auditEvents": [
     {
+      "id": "audit-acadcfc3e519282d",
+      "requestId": "test-req-f9d2eaf20dbf",
+      "userIdentifier": "test-operator",
+      "sessionId": "test-session",
+      "action": "SECURITY_TEST_AUDIT",
+      "route": "/api/test/route",
+      "targetResource": "test-resource",
+      "outcome": "SUCCESS",
+      "statusCode": 200,
+      "createdAt": "2026-09-13T06:25:17.938Z"
+    },
+    {
+      "id": "audit-5a7ff3b4c1f2cfc7",
+      "requestId": "test-req-b3b7d4532a64",
+      "userIdentifier": "test-operator",
+      "sessionId": "test-session",
+      "action": "SECURITY_TEST_AUDIT",
+      "route": "/api/test/route",
+      "targetResource": "test-resource",
+      "outcome": "SUCCESS",
+      "statusCode": 200,
+      "createdAt": "2026-09-13T06:24:56.565Z"
+    },
+    {
+      "id": "audit-6763ef9505ba1405",
+      "requestId": "req-07db062db35f",
+      "userIdentifier": "anonymous",
+      "sessionId": null,
+      "action": "GET /api/admin/audit-logs",
+      "route": "/api/admin/audit-logs",
+      "targetResource": null,
+      "outcome": "FAILURE",
+      "statusCode": 401,
+      "ipAddressHash": "12ca17b49af22894",
+      "metadata": {
+        "durationMs": 2,
+        "userAgent": "curl/7.88.1",
+        "query": {}
+      },
+      "createdAt": "2026-09-13T06:24:52.334Z"
+    },
+    {
+      "id": "audit-6443bf8749135525",
+      "requestId": "req-802b5b881d6c",
+      "userIdentifier": "anonymous",
+      "sessionId": null,
+      "action": "GET /api/readiness",
+      "route": "/api/readiness",
+      "targetResource": null,
+      "outcome": "SUCCESS",
+      "statusCode": 200,
+      "ipAddressHash": "12ca17b49af22894",
+      "metadata": {
+        "durationMs": 2,
+        "userAgent": "curl/7.88.1",
+        "query": {}
+      },
+      "createdAt": "2026-09-13T06:24:50.722Z"
+    },
+    {
+      "id": "audit-8c7dd376fa0fdc37",
+      "requestId": "test-req-ecf1205af52a",
+      "userIdentifier": "test-operator",
+      "sessionId": "test-session",
+      "action": "SECURITY_TEST_AUDIT",
+      "route": "/api/test/route",
+      "targetResource": "test-resource",
+      "outcome": "SUCCESS",
+      "statusCode": 200,
+      "createdAt": "2026-09-13T06:23:31.109Z"
+    },
+    {
+      "id": "audit-c3a30a94a3d97065",
+      "requestId": "test-req-df13270dc8d9",
+      "userIdentifier": "test-operator",
+      "sessionId": "test-session",
+      "action": "SECURITY_TEST_AUDIT",
+      "route": "/api/test/route",
+      "targetResource": "test-resource",
+      "outcome": "SUCCESS",
+      "statusCode": 200,
+      "createdAt": "2026-09-13T06:22:40.269Z"
+    },
+    {
       "id": "audit-a0e1f0821783ae3b",
       "requestId": "test-req-3695d51f9c2b",
       "userIdentifier": "test-operator",
@@ -62,6 +146,194 @@
     }
   ],
   "authorizationEvents": [
+    {
+      "id": "auth-grant-818898b923d931dc",
+      "clearanceId": "clr-7beddad23af60038",
+      "eventType": "GRANTED",
+      "projectName": "Restructuring Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:25:17.932Z",
+      "createdAt": "2026-09-13T06:25:17.932Z"
+    },
+    {
+      "id": "auth-grant-907a464b4bda064f",
+      "clearanceId": "clr-54f141af50296119",
+      "eventType": "GRANTED",
+      "projectName": "Expiration Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:25:17.923Z",
+      "createdAt": "2026-09-13T06:25:17.923Z"
+    },
+    {
+      "id": "auth-grant-fa1985f01cd81605",
+      "clearanceId": "clr-215825ecbd48be60",
+      "eventType": "GRANTED",
+      "projectName": "Allowlisted Test Project",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:25:17.921Z",
+      "createdAt": "2026-09-13T06:25:17.921Z"
+    },
+    {
+      "id": "auth-fail-59a5d8b2d85d0809",
+      "clearanceId": "none",
+      "eventType": "FAILED",
+      "projectName": "Test Project",
+      "scope": "defense_override",
+      "success": false,
+      "reason": "Invalid passcode provided",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.920Z"
+    },
+    {
+      "id": "auth-grant-915915289d8c78fc",
+      "clearanceId": "clr-560dca7d0ceafcd9",
+      "eventType": "GRANTED",
+      "projectName": "Restructuring Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:24:56.560Z",
+      "createdAt": "2026-09-13T06:24:56.560Z"
+    },
+    {
+      "id": "auth-grant-e2288b7757ddf5a9",
+      "clearanceId": "clr-ad193d7f42f69735",
+      "eventType": "GRANTED",
+      "projectName": "Expiration Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:24:56.550Z",
+      "createdAt": "2026-09-13T06:24:56.550Z"
+    },
+    {
+      "id": "auth-grant-89762138260d94ae",
+      "clearanceId": "clr-547ad26134429b91",
+      "eventType": "GRANTED",
+      "projectName": "Allowlisted Test Project",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:24:56.548Z",
+      "createdAt": "2026-09-13T06:24:56.548Z"
+    },
+    {
+      "id": "auth-fail-ffca95f59a9b8987",
+      "clearanceId": "none",
+      "eventType": "FAILED",
+      "projectName": "Test Project",
+      "scope": "defense_override",
+      "success": false,
+      "reason": "Invalid passcode provided",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.546Z"
+    },
+    {
+      "id": "auth-grant-8c9df29c33ec767f",
+      "clearanceId": "clr-01f5e482143c6752",
+      "eventType": "GRANTED",
+      "projectName": "Restructuring Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:23:31.104Z",
+      "createdAt": "2026-09-13T06:23:31.104Z"
+    },
+    {
+      "id": "auth-grant-2d8999a331b21aaa",
+      "clearanceId": "clr-69f5e7c91c727b28",
+      "eventType": "GRANTED",
+      "projectName": "Expiration Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:23:31.095Z",
+      "createdAt": "2026-09-13T06:23:31.095Z"
+    },
+    {
+      "id": "auth-grant-c6d91c3f5406e0b2",
+      "clearanceId": "clr-7a1d0142c5a2fb77",
+      "eventType": "GRANTED",
+      "projectName": "Allowlisted Test Project",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:23:31.093Z",
+      "createdAt": "2026-09-13T06:23:31.093Z"
+    },
+    {
+      "id": "auth-fail-4626bd7b9fec9a91",
+      "clearanceId": "none",
+      "eventType": "FAILED",
+      "projectName": "Test Project",
+      "scope": "defense_override",
+      "success": false,
+      "reason": "Invalid passcode provided",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.091Z"
+    },
+    {
+      "id": "auth-grant-5854330759b9b274",
+      "clearanceId": "clr-fa91c446571d0d79",
+      "eventType": "GRANTED",
+      "projectName": "Restructuring Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:22:40.264Z",
+      "createdAt": "2026-09-13T06:22:40.264Z"
+    },
+    {
+      "id": "auth-grant-35a374b3d8573162",
+      "clearanceId": "clr-060241271f1c7ca0",
+      "eventType": "GRANTED",
+      "projectName": "Expiration Test",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:22:40.250Z",
+      "createdAt": "2026-09-13T06:22:40.250Z"
+    },
+    {
+      "id": "auth-grant-867416324e855f03",
+      "clearanceId": "clr-41e90a62eb70c9f1",
+      "eventType": "GRANTED",
+      "projectName": "Allowlisted Test Project",
+      "scope": "Development Environment Allowlisted Workflows",
+      "success": true,
+      "reason": "Valid compliance passcode authenticated",
+      "sessionId": null,
+      "expiresAt": "2026-09-13T14:22:40.248Z",
+      "createdAt": "2026-09-13T06:22:40.248Z"
+    },
+    {
+      "id": "auth-fail-e04b880e439c2a3f",
+      "clearanceId": "none",
+      "eventType": "FAILED",
+      "projectName": "Test Project",
+      "scope": "defense_override",
+      "success": false,
+      "reason": "Invalid passcode provided",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.246Z"
+    },
     {
       "id": "auth-grant-3f9d4f626504f71b",
       "clearanceId": "clr-db6378949fb1bc7e",
@@ -299,6 +571,326 @@
     }
   ],
   "defenseScans": [
+    {
+      "id": "scan-e59e5967c7d1727b",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.934Z"
+    },
+    {
+      "id": "scan-67e15c43a82d5a59",
+      "decision": "ALLOWED",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance. [Clearance Verified: clr-7beddad23af60038 - Scope: Development Environment Allowlisted Workflows]",
+      "authorizationStatus": "AUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.933Z"
+    },
+    {
+      "id": "scan-1b4b7c2e1dc12fe8",
+      "decision": "REQUIRES_AUTHORIZATION",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.931Z"
+    },
+    {
+      "id": "scan-34027b419f95a293",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Medical Records & Diagnostic Claims",
+      "sanitizedReason": "Diagnostic claims and patient health records are restricted from automated pipeline compilation.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.930Z"
+    },
+    {
+      "id": "scan-202060a6769ebc59",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Credit Card Primary Account Number",
+      "sanitizedReason": "Detected payment card PAN pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.929Z"
+    },
+    {
+      "id": "scan-e72f1d673e6e1ade",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.928Z"
+    },
+    {
+      "id": "scan-2d9beb435bb8c25c",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Live Cloud Secret Key",
+      "sanitizedReason": "Detected live credential pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.927Z"
+    },
+    {
+      "id": "scan-ffabf06480948269",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Private Key Block",
+      "sanitizedReason": "Detected raw private key block in payload. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:25:17.926Z"
+    },
+    {
+      "id": "scan-67c6c33848f88bea",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.562Z"
+    },
+    {
+      "id": "scan-03bdf585e6f0f7f6",
+      "decision": "ALLOWED",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance. [Clearance Verified: clr-560dca7d0ceafcd9 - Scope: Development Environment Allowlisted Workflows]",
+      "authorizationStatus": "AUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.561Z"
+    },
+    {
+      "id": "scan-eae23f717809e993",
+      "decision": "REQUIRES_AUTHORIZATION",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.559Z"
+    },
+    {
+      "id": "scan-dcf5fe4f1393d657",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Medical Records & Diagnostic Claims",
+      "sanitizedReason": "Diagnostic claims and patient health records are restricted from automated pipeline compilation.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.558Z"
+    },
+    {
+      "id": "scan-97635b49f5c737b9",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Credit Card Primary Account Number",
+      "sanitizedReason": "Detected payment card PAN pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.557Z"
+    },
+    {
+      "id": "scan-c7b23f417c222f62",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.556Z"
+    },
+    {
+      "id": "scan-4197c66e27e01577",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Live Cloud Secret Key",
+      "sanitizedReason": "Detected live credential pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.555Z"
+    },
+    {
+      "id": "scan-6876d967e141f5ee",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Private Key Block",
+      "sanitizedReason": "Detected raw private key block in payload. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:24:56.554Z"
+    },
+    {
+      "id": "scan-5ff5a3bcbc9ce436",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.106Z"
+    },
+    {
+      "id": "scan-307008a1d4e4bd93",
+      "decision": "ALLOWED",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance. [Clearance Verified: clr-01f5e482143c6752 - Scope: Development Environment Allowlisted Workflows]",
+      "authorizationStatus": "AUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.104Z"
+    },
+    {
+      "id": "scan-02d74a2047fa37f6",
+      "decision": "REQUIRES_AUTHORIZATION",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.103Z"
+    },
+    {
+      "id": "scan-3d9bc7f55b9b0477",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Medical Records & Diagnostic Claims",
+      "sanitizedReason": "Diagnostic claims and patient health records are restricted from automated pipeline compilation.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.102Z"
+    },
+    {
+      "id": "scan-b67bf18c511dd29d",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Credit Card Primary Account Number",
+      "sanitizedReason": "Detected payment card PAN pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.101Z"
+    },
+    {
+      "id": "scan-9c6f045279187a27",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.100Z"
+    },
+    {
+      "id": "scan-1c6263cc101f5c41",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Live Cloud Secret Key",
+      "sanitizedReason": "Detected live credential pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.099Z"
+    },
+    {
+      "id": "scan-0263012cf2b052f7",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Private Key Block",
+      "sanitizedReason": "Detected raw private key block in payload. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:23:31.098Z"
+    },
+    {
+      "id": "scan-bc0c44eebed2dbb4",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.266Z"
+    },
+    {
+      "id": "scan-903c8fcd5bb70b09",
+      "decision": "ALLOWED",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance. [Clearance Verified: clr-fa91c446571d0d79 - Scope: Development Environment Allowlisted Workflows]",
+      "authorizationStatus": "AUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.265Z"
+    },
+    {
+      "id": "scan-5156e0149441ebc7",
+      "decision": "REQUIRES_AUTHORIZATION",
+      "category": "RESTRICTED_LEGAL",
+      "ruleTriggered": "Bankruptcy Asset Restructuring & Chapter 11 Operations",
+      "sanitizedReason": "Insolvency and debt restructuring workflows require verified internal Defense-of-Break compliance clearance.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.263Z"
+    },
+    {
+      "id": "scan-b74564fd52e8403f",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Medical Records & Diagnostic Claims",
+      "sanitizedReason": "Diagnostic claims and patient health records are restricted from automated pipeline compilation.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.262Z"
+    },
+    {
+      "id": "scan-21c444f66431f149",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Credit Card Primary Account Number",
+      "sanitizedReason": "Detected payment card PAN pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.260Z"
+    },
+    {
+      "id": "scan-75e057ee8e8177ae",
+      "decision": "BLOCKED",
+      "category": "ZERO_TOLERANCE_PII",
+      "ruleTriggered": "Social Security / Tax ID Pattern",
+      "sanitizedReason": "Detected unmasked SSN/TIN format. Personal identity data is strictly prohibited.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.259Z"
+    },
+    {
+      "id": "scan-1bd76ef3cdfe84ba",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Live Cloud Secret Key",
+      "sanitizedReason": "Detected live credential pattern. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.256Z"
+    },
+    {
+      "id": "scan-e09c56a819754ba4",
+      "decision": "BLOCKED",
+      "category": "CREDENTIAL_LEAK",
+      "ruleTriggered": "Private Key Block",
+      "sanitizedReason": "Detected raw private key block in payload. Rejection is unconditional.",
+      "authorizationStatus": "UNAUTHORIZED",
+      "sessionId": null,
+      "createdAt": "2026-09-13T06:22:40.254Z"
+    },
     {
       "id": "scan-c81c54d28e303038",
       "decision": "BLOCKED",

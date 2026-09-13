@@ -21,6 +21,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "firebase-admin": "^14.4.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.33.0",
     "motion": "^13.1.1",
