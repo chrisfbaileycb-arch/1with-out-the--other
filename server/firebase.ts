@@ -307,3 +307,42 @@ export function getFirebaseOperationalState(): {
     storageTarget: status.initialized ? "cloud-firestore" : "local-durable-json",
   };
 }
+
+/**
+ * Distinguishes App Check operational enforcement state:
+ * - ENFORCED: Strict token validation actively blocking unverified requests
+ * - CONFIGURED: SDK initialized and validating tokens in advisory/permissive mode
+ * - BYPASSED: Local emulator or explicitly bypassed
+ * - UNAVAILABLE: SDK not initialized or credentials missing
+ */
+export function getAppCheckEnforcementStatus(): "ENFORCED" | "CONFIGURED" | "BYPASSED" | "UNAVAILABLE" {
+  if (!firebaseApp || !firebaseAppCheck) {
+    return "UNAVAILABLE";
+  }
+  if (process.env.APP_CHECK_ENFORCE === "true") {
+    return "ENFORCED";
+  }
+  if (currentStatus.usingEmulator || process.env.NODE_ENV !== "production") {
+    return "BYPASSED";
+  }
+  return "CONFIGURED";
+}
+
+/**
+ * Actively checks Firestore roundtrip connectivity with latency measurement.
+ */
+export async function testFirestoreConnectivity(): Promise<{ connected: boolean; latencyMs: number; error?: string }> {
+  const db = getFirestoreDb();
+  if (!db) {
+    return { connected: false, latencyMs: 0, error: "Firestore is not configured." };
+  }
+  const t0 = performance.now();
+  try {
+    await db.collection("_health").doc("ping").get();
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: true, latencyMs };
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - t0);
+    return { connected: false, latencyMs, error: err.message || "Failed to reach Firestore" };
+  }
+}

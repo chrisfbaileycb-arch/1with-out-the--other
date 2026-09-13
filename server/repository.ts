@@ -644,19 +644,68 @@ class PostgresRepository implements DataRepository {
   }
 }
 
+// ─── Dynamic Unified Repository Proxy ───────────────────────────────────────
+class DynamicRepositoryProxy implements DataRepository {
+  private firestoreRepo: FirestoreRepository | null = null;
+  private postgresRepo: PostgresRepository | null = null;
+  private localRepo: LocalFileRepository = new LocalFileRepository();
+
+  private getDelegate(): DataRepository {
+    const db = getFirestoreDb();
+    if (db) {
+      if (!this.firestoreRepo) {
+        this.firestoreRepo = new FirestoreRepository(db);
+      }
+      return this.firestoreRepo;
+    }
+    if (serverConfig.databaseUrl && serverConfig.databaseUrl.trim()) {
+      if (!this.postgresRepo) {
+        this.postgresRepo = new PostgresRepository(serverConfig.databaseUrl.trim());
+      }
+      return this.postgresRepo;
+    }
+    if (!serverConfig.allowLocalPersistenceFallback && process.env.NODE_ENV === "production") {
+      throw new Error("Local persistence fallback is prohibited in production when ALLOW_LOCAL_PERSISTENCE_FALLBACK=false.");
+    }
+    return this.localRepo;
+  }
+
+  async saveAuditEvent(event: StoredAuditEvent): Promise<void> {
+    return this.getDelegate().saveAuditEvent(event);
+  }
+  async getAuditEvents(limit: number = 50, offset: number = 0): Promise<StoredAuditEvent[]> {
+    return this.getDelegate().getAuditEvents(limit, offset);
+  }
+  async saveAuthorizationEvent(event: StoredAuthorizationEvent): Promise<void> {
+    return this.getDelegate().saveAuthorizationEvent(event);
+  }
+  async saveDefenseScan(scan: StoredDefenseScan): Promise<void> {
+    return this.getDelegate().saveDefenseScan(scan);
+  }
+  async saveDiscernmentReport(report: StoredDiscernment): Promise<void> {
+    return this.getDelegate().saveDiscernmentReport(report);
+  }
+  async saveTestRun(run: StoredTestRun): Promise<void> {
+    return this.getDelegate().saveTestRun(run);
+  }
+  async getLatestTestRuns(limit: number = 10): Promise<StoredTestRun[]> {
+    return this.getDelegate().getLatestTestRuns(limit);
+  }
+  async checkHealth(): Promise<{ isConnected: boolean; engine: string; latencyMs: number; error?: string }> {
+    return this.getDelegate().checkHealth();
+  }
+  async healthCheck(): Promise<{ healthy: boolean; mode: string; latencyMs: number; error?: string }> {
+    return this.getDelegate().healthCheck();
+  }
+  async close(): Promise<void> {
+    if (this.postgresRepo) await this.postgresRepo.close();
+    await this.localRepo.close();
+  }
+}
+
 // ─── Repository Factory ─────────────────────────────────────────────────────
 export function createDataRepository(): DataRepository {
-  const db = getFirestoreDb();
-  if (db) {
-    return new FirestoreRepository(db);
-  }
-
-  // OPTIONAL SQL ADAPTER: Retained for portability if PostgreSQL DATABASE_URL is configured
-  if (serverConfig.databaseUrl && serverConfig.databaseUrl.trim()) {
-    return new PostgresRepository(serverConfig.databaseUrl.trim());
-  }
-
-  return new LocalFileRepository();
+  return new DynamicRepositoryProxy();
 }
 
 export const repository = createDataRepository();

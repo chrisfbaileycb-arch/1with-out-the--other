@@ -122,7 +122,7 @@ export async function evaluateDefenseSafety(
   }
 
   // Check clearance token validity
-  const validClearance = validateClearanceToken(clearanceToken);
+  const validClearance = await validateClearanceToken(clearanceToken);
 
   // Check rules in order of priority (BLOCKED first, then REQUIRES_AUTHORIZATION)
   for (const rule of DEFENSE_RULES) {

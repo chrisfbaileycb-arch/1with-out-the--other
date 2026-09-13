@@ -20,7 +20,12 @@ import {
 } from "./server/security";
 import { evaluateDefenseSafety } from "./server/defense";
 import { auditTrailMiddleware, recordAuditEvent } from "./server/audit";
-import { runDeploymentReadinessChecks, getLatestReadinessSuite, getLatestReadinessSuiteAsync } from "./server/readiness";
+import {
+  runDeploymentReadinessChecks,
+  getLatestReadinessSuite,
+  getLatestReadinessSuiteAsync,
+  checkSubsystemReadiness,
+} from "./server/readiness";
 import { getFirebaseStatus, getFirebaseAppCheck, closeFirebase } from "./server/firebase";
 import { durableSessionStore } from "./server/durable-stores";
 
@@ -38,27 +43,39 @@ app.use((req, res, next) => {
   next();
 });
 
-// App Check defensive verification (defense-in-depth, non-blocking in development)
+// App Check defensive verification (defense-in-depth, strictly enforced if configured)
 app.use(async (req, res, next) => {
+  if (req.path === "/api/health" || req.path === "/api/readiness") {
+    return next();
+  }
+
   const appCheckToken = req.header("X-Firebase-AppCheck");
-  if (appCheckToken) {
-    const appCheck = getFirebaseAppCheck();
-    if (appCheck) {
-      try {
-        const claims = await appCheck.verifyToken(appCheckToken);
-        (req as any).appCheck = claims;
-      } catch (err: any) {
-        if (process.env.APP_CHECK_ENFORCE === "true" && process.env.NODE_ENV === "production") {
-          return res.status(401).json({
-            error: "Firebase App Check verification failed.",
-            code: "APP_CHECK_INVALID",
-            requestId: (req as any).id || "req-unknown",
-            timestamp: new Date().toISOString(),
-          });
-        }
+  const appCheck = getFirebaseAppCheck();
+
+  if (appCheckToken && appCheck) {
+    try {
+      const claims = await appCheck.verifyToken(appCheckToken);
+      (req as any).appCheck = claims;
+      return next();
+    } catch (err: any) {
+      if (serverConfig.appCheckEnforce) {
+        return res.status(401).json({
+          error: "Firebase App Check verification failed.",
+          code: "APP_CHECK_INVALID",
+          requestId: (req as any).id || "req-unknown",
+          timestamp: new Date().toISOString(),
+        });
       }
     }
+  } else if (serverConfig.appCheckEnforce && process.env.NODE_ENV === "production") {
+    return res.status(401).json({
+      error: "Firebase App Check token required.",
+      code: "APP_CHECK_REQUIRED",
+      requestId: (req as any).id || "req-unknown",
+      timestamp: new Date().toISOString(),
+    });
   }
+
   next();
 });
 
@@ -146,54 +163,21 @@ app.get("/api/health", async (req, res) => {
 
 // 1b. API: Readiness Diagnostic (Truthful component-level operational states without secret leakage)
 app.get("/api/readiness", async (req, res) => {
-  const fbStatus = getFirebaseStatus();
-  const repoHealth = await repository.healthCheck();
-  const hasGemini = !!serverConfig.geminiApiKey;
-  const isAuthConfigured = !!serverConfig.internalAuthPasswordHash;
-
-  const isReady = repoHealth.healthy && isAuthConfigured;
-
-  res.status(isReady ? 200 : 503).json({
-    status: isReady ? "READY" : "DEGRADED",
-    timestamp: new Date().toISOString(),
-    subsystems: {
-      firebase: {
-        initialized: fbStatus.initialized,
-        mode: fbStatus.mode,
-        projectIdConfigured: !!fbStatus.projectId,
-        services: fbStatus.services,
-      },
-      persistence: {
-        mode: repoHealth.mode,
-        healthy: repoHealth.healthy,
-        latencyMs: repoHealth.latencyMs,
-      },
-      sessions: {
-        durable: true,
-        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
-      },
-      clearances: {
-        durable: true,
-        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
-      },
-      rateLimiter: {
-        durable: true,
-        backend: fbStatus.initialized ? "FIRESTORE" : "LOCAL_DURABLE_DISK",
-      },
-      gemini: {
-        configured: hasGemini,
-        mode: hasGemini ? "API_KEY_PRESENT" : "HEURISTIC_FALLBACK",
-      },
-      security: {
-        csrfEnforced: true,
-        defensePasscodesActive: serverConfig.defensePasscodes.length,
-      },
-    },
-  });
+  try {
+    const report = await checkSubsystemReadiness();
+    const httpStatus = report.status === "FAILED" ? 503 : 200;
+    res.status(httpStatus).json(report);
+  } catch (err: any) {
+    res.status(500).json({
+      status: "FAILED",
+      error: err.message || "Failed to probe subsystem readiness.",
+      timestamp: new Date().toISOString(),
+    });
+  }
 });
 
-// 2. API: Defense-of-Break Heuristic Sentinel Scan (4-state decision)
-app.post("/api/defense/scan", async (req, res) => {
+// 2. API: Defense-of-Break Heuristic Sentinel Scan (4-state decision, Rate-limited)
+app.post("/api/defense/scan", apiRateLimiter(30, 60000, "defense:scan"), async (req, res) => {
   try {
     const { content, clearanceToken } = req.body;
     if (!content || typeof content !== "string") {
@@ -333,8 +317,8 @@ app.get("/api/admin/firebase-status", requireOperatorAuth, (req, res) => {
   });
 });
 
-// 7. API: Claims & Opportunity Discernment Engine
-app.post("/api/discern", async (req, res) => {
+// 7. API: Claims & Opportunity Discernment Engine (Rate-limited, Durable clearance)
+app.post("/api/discern", apiRateLimiter(20, 60000, "discern"), async (req, res) => {
   try {
     const { content, inputType, sourceUrl, mode = "evaluate", securityPasscode, clearanceToken } = req.body;
 
@@ -343,7 +327,7 @@ app.post("/api/discern", async (req, res) => {
     }
 
     const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
-    let clearance = validateClearanceToken(clearanceToken);
+    let clearance = await validateClearanceToken(clearanceToken);
 
     // If client provided securityPasscode, verify it without exposing secrets
     if (!clearance && securityPasscode) {
@@ -472,8 +456,8 @@ Also synthesize a "De-Risked Real-World Test Plan":
   }
 });
 
-// 4. API: 5-to-10 Directive Agent Skill Builder & Ingestion Engine
-app.post("/api/skills/build", async (req, res) => {
+// 4. API: 5-to-10 Directive Agent Skill Builder & Ingestion Engine (Rate-limited)
+app.post("/api/skills/build", apiRateLimiter(15, 60000, "skills:build"), async (req, res) => {
   try {
     const {
       tutorialContent,
@@ -489,7 +473,7 @@ app.post("/api/skills/build", async (req, res) => {
     }
 
     const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
-    let clearance = validateClearanceToken(clearanceToken);
+    let clearance = await validateClearanceToken(clearanceToken);
 
     if (!clearance && securityPasscode) {
       const clientIp = req.ip || req.socket.remoteAddress || "unknown";
@@ -651,8 +635,8 @@ Also generate:
   }
 });
 
-// 5. API: 6-Pillar Launch Verification Matrix Scanner
-app.post("/api/audit/scan", async (req, res) => {
+// 5. API: 6-Pillar Launch Verification Matrix Scanner (Rate-limited)
+app.post("/api/audit/scan", apiRateLimiter(20, 60000, "audit:scan"), async (req, res) => {
   try {
     const { appName, repoUrl, liveUrl, stackDescription, codeSnippets } = req.body;
 
@@ -745,8 +729,8 @@ Output realistic scores (0-100), critical blocker warnings, non-blocking recomme
   }
 });
 
-// 6. API: Multi-Mode Universal Pipeline
-app.post("/api/pipeline/process", async (req, res) => {
+// 6. API: Multi-Mode Universal Pipeline (Rate-limited)
+app.post("/api/pipeline/process", apiRateLimiter(15, 60000, "pipeline:process"), async (req, res) => {
   try {
     const { mode, rawContent, inputType, title } = req.body;
 
@@ -1005,8 +989,8 @@ app.post("/api/shipworthy/persona/run", (req, res) => {
   }
 });
 
-// 4. Generate Unified Shipworthy Flight Report & Certification Dossier
-app.post("/api/shipworthy/report/generate", async (req, res) => {
+// 4. Generate Unified Shipworthy Flight Report & Certification Dossier (Rate-limited)
+app.post("/api/shipworthy/report/generate", apiRateLimiter(10, 60000, "report:generate"), async (req, res) => {
   try {
     const {
       repoTarget = "https://github.com/company/enterprise-web-core",

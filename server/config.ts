@@ -13,6 +13,8 @@ export interface ServerConfig {
   internalAuthPasswordHash: string;
   defensePasscodes: PasscodeCredential[];
   corsAllowedOrigins: string[];
+  allowLocalPersistenceFallback: boolean;
+  appCheckEnforce: boolean;
 }
 
 export interface PasscodeCredential {
@@ -135,6 +137,9 @@ export function loadServerConfig(): ServerConfig {
     ? corsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : [];
 
+  const allowLocalPersistenceFallback = process.env.ALLOW_LOCAL_PERSISTENCE_FALLBACK !== "false";
+  const appCheckEnforce = process.env.APP_CHECK_ENFORCE === "true";
+
   return {
     port,
     nodeEnv,
@@ -145,6 +150,8 @@ export function loadServerConfig(): ServerConfig {
     internalAuthPasswordHash,
     defensePasscodes,
     corsAllowedOrigins,
+    allowLocalPersistenceFallback,
+    appCheckEnforce,
   };
 }
 

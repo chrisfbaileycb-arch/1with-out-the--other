@@ -61,14 +61,14 @@ describe("Production Server Modules: Security & Passcode Verification", () => {
     const authRes = await verifyAndAuthorizePasscode(validDevCode, "Expiration Test", undefined, "127.0.0.50");
 
     if (authRes.success && authRes.clearance) {
-      const verified = validateClearanceToken(authRes.clearance.clearanceToken);
+      const verified = await validateClearanceToken(authRes.clearance.clearanceToken);
       expect(verified).not.toBeNull();
       expect(verified?.projectName).toBe("Expiration Test");
 
       // An invalid token must return null
-      expect(validateClearanceToken("invalid-non-existent-token")).toBeNull();
-      expect(validateClearanceToken("")).toBeNull();
-      expect(validateClearanceToken(undefined)).toBeNull();
+      expect(await validateClearanceToken("invalid-non-existent-token")).toBeNull();
+      expect(await validateClearanceToken("")).toBeNull();
+      expect(await validateClearanceToken(undefined)).toBeNull();
     }
   });
 
@@ -311,5 +311,102 @@ describe("Production Server Modules: Durable Stores & Firebase Resilience", () =
     const rAfterReset = await durableRateLimiterStore.checkAndIncrement(testKey, 3, 10000);
     expect(rAfterReset.allowed).toBe(true);
     expect(rAfterReset.currentCount).toBe(1);
+  });
+});
+
+describe("Production Durability: Restart-Safety & Multi-Instance Synchronization", () => {
+  it("persists sessions, clearances, and rate limits across simulated process restarts", async () => {
+    const {
+      DurableSessionStore,
+      DurableClearanceStore,
+      DurableRateLimiterStore,
+    } = await import("./durable-stores");
+
+    // Process Instance 1 creates state
+    const instance1SessionStore = new DurableSessionStore();
+    const instance1ClearanceStore = new DurableClearanceStore();
+    const instance1RateLimiterStore = new DurableRateLimiterStore();
+
+    const testOperator = `restart-test-operator-${generateSecureToken(4)}`;
+    const session = await instance1SessionStore.createSession(testOperator, "operator");
+    expect(session.sessionId).toBeDefined();
+
+    const { clearance, rawToken } = await instance1ClearanceStore.issueClearance({
+      projectName: "Restart Safety Project",
+      scope: "Durable Testing",
+      durationMs: 3600000,
+      operatorId: session.sessionId,
+    });
+    expect(clearance.clearanceId).toBeDefined();
+
+    const rateKey = `restart-rate-${generateSecureToken(6)}`;
+    const rate1 = await instance1RateLimiterStore.checkAndIncrement(rateKey, 5, 60000);
+    const rate2 = await instance1RateLimiterStore.checkAndIncrement(rateKey, 5, 60000);
+    expect(rate1.currentCount).toBe(1);
+    expect(rate2.currentCount).toBe(2);
+
+    // SIMULATE PROCESS RESTART:
+    // Process Instance 2 starts with totally fresh, empty in-memory state
+    const instance2SessionStore = new DurableSessionStore();
+    const instance2ClearanceStore = new DurableClearanceStore();
+    const instance2RateLimiterStore = new DurableRateLimiterStore();
+
+    // Verify session survived restart
+    const restoredSession = await instance2SessionStore.getSession(session.sessionId);
+    expect(restoredSession).not.toBeNull();
+    expect(restoredSession?.sessionId).toBe(session.sessionId);
+    expect(restoredSession?.user).toBe(testOperator);
+
+    // Verify clearance survived restart
+    const restoredClearance = await instance2ClearanceStore.validateClearance(rawToken);
+    expect(restoredClearance).not.toBeNull();
+    expect(restoredClearance?.clearanceId).toBe(clearance.clearanceId);
+    expect(restoredClearance?.projectName).toBe("Restart Safety Project");
+
+    // Verify rate limit counter survived restart
+    const rate3 = await instance2RateLimiterStore.checkAndIncrement(rateKey, 5, 60000);
+    expect(rate3.currentCount).toBe(3);
+    expect(rate3.allowed).toBe(true);
+
+    // Test revocation persists across restart
+    await instance2SessionStore.revokeSession(session.sessionId);
+    await instance2ClearanceStore.revokeClearance(clearance.clearanceId);
+
+    // Process Instance 3 starts after revocation
+    const instance3SessionStore = new DurableSessionStore();
+    const instance3ClearanceStore = new DurableClearanceStore();
+
+    const afterRevokeSession = await instance3SessionStore.getSession(session.sessionId);
+    expect(afterRevokeSession).toBeNull();
+
+    const afterRevokeClearance = await instance3ClearanceStore.validateClearance(rawToken);
+    expect(afterRevokeClearance).toBeNull();
+  });
+
+  it("truthfully probes component-level operational readiness without false green states", async () => {
+    const { checkSubsystemReadiness } = await import("./readiness");
+
+    const report = await checkSubsystemReadiness();
+    expect(report).toBeDefined();
+    expect(["READY", "DEGRADED", "FAILED"]).toContain(report.status);
+
+    const subsystems = report.subsystems;
+    expect(subsystems.firebaseAdmin).toBeDefined();
+    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.firebaseAdmin.status);
+
+    expect(subsystems.sessionPersistenceReachable).toBeDefined();
+    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.sessionPersistenceReachable.status);
+
+    expect(subsystems.clearancePersistenceReachable).toBeDefined();
+    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.clearancePersistenceReachable.status);
+
+    expect(subsystems.rateLimitPersistenceReachable).toBeDefined();
+    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.rateLimitPersistenceReachable.status);
+
+    expect(subsystems.auditPersistenceReachable).toBeDefined();
+    expect(["VERIFIED", "CONFIGURED", "DEGRADED", "FAILED", "NOT CONFIGURED"]).toContain(subsystems.auditPersistenceReachable.status);
+
+    expect(subsystems.geminiConfigured).toBeDefined();
+    expect(subsystems.appCheckStatus).toBeDefined();
   });
 });

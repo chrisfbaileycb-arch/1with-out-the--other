@@ -67,11 +67,15 @@ export async function recordAuditEvent(params: {
       ? crypto.createHash("sha256").update(params.clientIp).digest("hex").substring(0, 16)
       : "unknown";
 
+    const safeSessionIdentifier = params.sessionId
+      ? `sess-${crypto.createHash("sha256").update(params.sessionId).digest("hex").substring(0, 12)}`
+      : null;
+
     const event: StoredAuditEvent = {
       id: `audit-${crypto.randomBytes(8).toString("hex")}`,
       requestId: params.requestId,
       userIdentifier: params.userIdentifier || "anonymous",
-      sessionId: params.sessionId || null,
+      sessionId: safeSessionIdentifier,
       action: params.action,
       route: params.route,
       targetResource: params.targetResource || null,

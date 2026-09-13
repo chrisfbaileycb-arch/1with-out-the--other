@@ -5,8 +5,8 @@ import { serverConfig } from "./config";
 import { repository } from "./repository";
 import { evaluateDefenseSafety } from "./defense";
 import { verifyAndAuthorizePasscode, authenticateInternalUser } from "./security";
-import { getFirebaseStatus, getFirestoreDb } from "./firebase";
-import { durableSessionStore, durableRateLimiterStore } from "./durable-stores";
+import { getFirebaseStatus, getFirestoreDb, testFirestoreConnectivity, getAppCheckEnforcementStatus } from "./firebase";
+import { durableSessionStore, durableClearanceStore, durableRateLimiterStore } from "./durable-stores";
 
 export type TestEvidenceStatus = "NOT_RUN" | "PASSED" | "FAILED" | "SKIPPED";
 
@@ -546,4 +546,181 @@ export async function getLatestReadinessSuiteAsync(): Promise<DeploymentReadines
   }
 
   return null;
+}
+
+export type SubsystemReadinessState = "VERIFIED" | "CONFIGURED" | "DEGRADED" | "FAILED" | "NOT CONFIGURED";
+
+export interface ReadinessSubsystemReport {
+  status: "READY" | "DEGRADED" | "FAILED";
+  timestamp: string;
+  subsystems: {
+    firebaseAdmin: {
+      status: SubsystemReadinessState;
+      mode: string;
+      details?: Record<string, any>;
+    };
+    firestoreReachable: {
+      status: SubsystemReadinessState;
+      latencyMs?: number;
+      error?: string;
+    };
+    sessionPersistenceReachable: {
+      status: SubsystemReadinessState;
+      backend: string;
+      latencyMs?: number;
+      error?: string;
+    };
+    clearancePersistenceReachable: {
+      status: SubsystemReadinessState;
+      backend: string;
+      latencyMs?: number;
+      error?: string;
+    };
+    rateLimitPersistenceReachable: {
+      status: SubsystemReadinessState;
+      backend: string;
+      latencyMs?: number;
+      error?: string;
+    };
+    auditPersistenceReachable: {
+      status: SubsystemReadinessState;
+      backend: string;
+      latencyMs?: number;
+      error?: string;
+    };
+    geminiConfigured: {
+      status: SubsystemReadinessState;
+      mode: string;
+    };
+    appCheckStatus: {
+      status: SubsystemReadinessState;
+      enforcement: "ENFORCED" | "CONFIGURED" | "BYPASSED" | "UNAVAILABLE";
+    };
+  };
+}
+
+/**
+ * Truthfully probes and reports component-level operational readiness states.
+ * States: VERIFIED, CONFIGURED, DEGRADED, FAILED, NOT CONFIGURED.
+ * Never outputs a green status if a dependency was not actually tested.
+ */
+export async function checkSubsystemReadiness(): Promise<ReadinessSubsystemReport> {
+  const fbStatus = getFirebaseStatus();
+  const firestoreTest = await testFirestoreConnectivity();
+  const sessionHealth = await durableSessionStore.checkHealth();
+  const clearanceHealth = await durableClearanceStore.checkHealth();
+  const rateLimitHealth = await durableRateLimiterStore.checkHealth();
+  const auditHealth = await repository.checkHealth();
+  const appCheckEnforce = getAppCheckEnforcementStatus();
+
+  // 1. Firebase Admin
+  let fbAdminState: SubsystemReadinessState = "NOT CONFIGURED";
+  if (fbStatus.initialized) {
+    fbAdminState = "CONFIGURED";
+  }
+
+  // 2. Firestore Reachable
+  let firestoreState: SubsystemReadinessState = "NOT CONFIGURED";
+  if (firestoreTest.connected) {
+    firestoreState = "VERIFIED";
+  } else if (fbStatus.initialized) {
+    firestoreState = "FAILED";
+  }
+
+  // 3. Session Persistence
+  let sessionState: SubsystemReadinessState = "FAILED";
+  if (sessionHealth.healthy) {
+    sessionState = sessionHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+  }
+
+  // 4. Clearance Persistence
+  let clearanceState: SubsystemReadinessState = "FAILED";
+  if (clearanceHealth.healthy) {
+    clearanceState = clearanceHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+  }
+
+  // 5. Rate-Limit Persistence
+  let rateLimitState: SubsystemReadinessState = "FAILED";
+  if (rateLimitHealth.healthy) {
+    rateLimitState = rateLimitHealth.backend === "FIRESTORE" ? "VERIFIED" : "DEGRADED";
+  }
+
+  // 6. Audit Persistence
+  let auditState: SubsystemReadinessState = "FAILED";
+  if (auditHealth.isConnected) {
+    auditState = auditHealth.engine === "firestore" || auditHealth.engine === "postgresql" ? "VERIFIED" : "DEGRADED";
+  }
+
+  // 7. Gemini Configured
+  const hasGemini = !!serverConfig.geminiApiKey;
+  const geminiState: SubsystemReadinessState = hasGemini ? "CONFIGURED" : "NOT CONFIGURED";
+
+  // 8. App Check Status
+  let appCheckState: SubsystemReadinessState = "NOT CONFIGURED";
+  if (appCheckEnforce === "ENFORCED" || appCheckEnforce === "CONFIGURED") {
+    appCheckState = "CONFIGURED";
+  } else if (appCheckEnforce === "BYPASSED") {
+    appCheckState = "DEGRADED";
+  }
+
+  // Determine overall status
+  const criticalStates = [sessionState, clearanceState, rateLimitState, auditState];
+  const anyFailed = criticalStates.includes("FAILED") || firestoreState === "FAILED";
+  const anyDegraded = criticalStates.includes("DEGRADED");
+
+  let overallStatus: "READY" | "DEGRADED" | "FAILED" = "READY";
+  if (anyFailed) {
+    overallStatus = "FAILED";
+  } else if (anyDegraded) {
+    overallStatus = "DEGRADED";
+  }
+
+  return {
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    subsystems: {
+      firebaseAdmin: {
+        status: fbAdminState,
+        mode: fbStatus.mode,
+        details: { projectId: fbStatus.projectId, services: fbStatus.services },
+      },
+      firestoreReachable: {
+        status: firestoreState,
+        latencyMs: firestoreTest.latencyMs,
+        error: firestoreTest.error,
+      },
+      sessionPersistenceReachable: {
+        status: sessionState,
+        backend: sessionHealth.backend,
+        latencyMs: sessionHealth.latencyMs,
+        error: sessionHealth.error,
+      },
+      clearancePersistenceReachable: {
+        status: clearanceState,
+        backend: clearanceHealth.backend,
+        latencyMs: clearanceHealth.latencyMs,
+        error: clearanceHealth.error,
+      },
+      rateLimitPersistenceReachable: {
+        status: rateLimitState,
+        backend: rateLimitHealth.backend,
+        latencyMs: rateLimitHealth.latencyMs,
+        error: rateLimitHealth.error,
+      },
+      auditPersistenceReachable: {
+        status: auditState,
+        backend: auditHealth.engine,
+        latencyMs: auditHealth.latencyMs,
+        error: auditHealth.error,
+      },
+      geminiConfigured: {
+        status: geminiState,
+        mode: hasGemini ? "API_KEY_PRESENT" : "HEURISTIC_FALLBACK",
+      },
+      appCheckStatus: {
+        status: appCheckState,
+        enforcement: appCheckEnforce,
+      },
+    },
+  };
 }

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { serverConfig, timingSafeEqualStrings, hashSecret, generateSecureToken } from "./config";
 import { repository } from "./repository";
 import { getFirebaseAuth } from "./firebase";
+import { recordAuditEvent } from "./audit";
 import {
   durableSessionStore,
   durableClearanceStore,
@@ -54,6 +55,17 @@ export async function verifyAndAuthorizePasscode(
   const rateLimitStatus = await durableRateLimiterStore.checkAndIncrement(rateKey, 5, 15 * 60 * 1000);
   if (!rateLimitStatus.allowed) {
     const waitMinutes = Math.ceil((rateLimitStatus.resetAt - now) / 60000);
+    await repository.saveAuthorizationEvent({
+      id: `auth-limit-${generateSecureToken(8)}`,
+      clearanceId: "none",
+      eventType: "FAILED",
+      projectName: projectName || "unspecified",
+      scope: scope || "defense_override",
+      success: false,
+      reason: `Too many failed passcode attempts. Locked out for ${waitMinutes} minutes.`,
+      sessionId: sessionId || null,
+      createdAt: new Date().toISOString(),
+    });
     return {
       success: false,
       error: `Too many failed passcode attempts. Locked out for ${waitMinutes} minutes.`,
@@ -158,36 +170,10 @@ export async function verifyAndAuthorizePasscode(
 
 /**
  * Validates a clearance token from request header or body.
- * Synchronous version using fast durable local cache.
+ * Always checks the canonical durable store (Firestore when available).
  */
-export function validateClearanceToken(token?: string): SecurityClearanceRecord | null {
-  if (!token) return null;
-  const tokenHash = hashSecret(token.trim());
-  const now = Date.now();
-
-  // Check store
-  const cached = (durableClearanceStore as any).localClearances?.get(tokenHash);
-  if (!cached) return null;
-  if (cached.revoked) return null;
-  if (new Date(cached.expiresAt).getTime() <= now) return null;
-
-  return {
-    clearanceId: cached.clearanceId,
-    clearanceToken: token,
-    isCleared: true,
-    projectName: cached.projectName,
-    authorizedScope: cached.authorizedScope,
-    issuedAt: cached.issuedAt,
-    expiresAt: cached.expiresAt,
-    revoked: cached.revoked,
-  };
-}
-
-/**
- * Validates a clearance token asynchronously (checks Firestore).
- */
-export async function validateClearanceTokenAsync(token?: string): Promise<SecurityClearanceRecord | null> {
-  if (!token) return null;
+export async function validateClearanceToken(token?: string): Promise<SecurityClearanceRecord | null> {
+  if (!token || typeof token !== "string") return null;
   const durable = await durableClearanceStore.validateClearance(token);
   if (!durable) return null;
 
@@ -202,6 +188,11 @@ export async function validateClearanceTokenAsync(token?: string): Promise<Secur
     revoked: durable.revoked,
   };
 }
+
+/**
+ * Validates a clearance token asynchronously (alias for validateClearanceToken).
+ */
+export const validateClearanceTokenAsync = validateClearanceToken;
 
 /**
  * Internal operator login service.
@@ -219,6 +210,16 @@ export async function authenticateInternalUser(
   const rateCheck = await durableRateLimiterStore.checkAndIncrement(rateKey, 10, 15 * 60 * 1000);
   if (!rateCheck.allowed) {
     const waitMinutes = Math.ceil((rateCheck.resetAt - now) / 60000);
+    await recordAuditEvent({
+      requestId: `auth-limit-${generateSecureToken(6)}`,
+      userIdentifier: username ? username.trim() : "unknown",
+      action: "OPERATOR_LOGIN_RATE_LIMITED",
+      route: "/api/auth/login",
+      outcome: "BLOCKED",
+      statusCode: 429,
+      clientIp,
+      metadata: { waitMinutes, key: rateKey },
+    });
     return {
       success: false,
       error: `Too many failed login attempts. Locked out for ${waitMinutes} minutes.`,
@@ -235,6 +236,16 @@ export async function authenticateInternalUser(
   const passMatch = timingSafeEqualStrings(passHash, serverConfig.internalAuthPasswordHash);
 
   if (!userMatch || !passMatch) {
+    await recordAuditEvent({
+      requestId: `auth-fail-${generateSecureToken(6)}`,
+      userIdentifier: username ? username.trim() : "unknown",
+      action: "OPERATOR_LOGIN_FAILED",
+      route: "/api/auth/login",
+      outcome: "FAILURE",
+      statusCode: 401,
+      clientIp,
+      metadata: { reason: "Invalid username or password" },
+    });
     return { success: false, error: "Invalid operator credentials.", statusCode: 401 };
   }
 
@@ -243,6 +254,19 @@ export async function authenticateInternalUser(
 
   // Issue durable session
   const session = await durableSessionStore.createSession(username.trim(), "operator");
+
+  await recordAuditEvent({
+    requestId: `auth-ok-${generateSecureToken(6)}`,
+    userIdentifier: username.trim(),
+    sessionId: session.sessionId,
+    action: "OPERATOR_LOGIN_SUCCESS",
+    route: "/api/auth/login",
+    outcome: "SUCCESS",
+    statusCode: 200,
+    clientIp,
+    metadata: { role: "operator" },
+  });
+
   return { success: true, session, statusCode: 200 };
 }
 
@@ -287,23 +311,16 @@ export async function invalidateSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Retrieves an active session synchronously from durable store cache.
+ * Retrieves an active session asynchronously (always checking canonical durable store).
  */
-export function getActiveSession(sessionId?: string): ActiveSession | null {
-  if (!sessionId) return null;
-  const now = Date.now();
-  const cached = (durableSessionStore as any).localSessions?.get(sessionId);
-  if (!cached) return null;
-  if (cached.expiresAt <= now || cached.revoked) return null;
-  return cached;
+export async function getActiveSession(sessionId?: string): Promise<ActiveSession | null> {
+  return durableSessionStore.getSession(sessionId);
 }
 
 /**
- * Retrieves an active session asynchronously (checking Firestore).
+ * Retrieves an active session asynchronously (alias).
  */
-export async function getActiveSessionAsync(sessionId?: string): Promise<ActiveSession | null> {
-  return durableSessionStore.getSession(sessionId);
-}
+export const getActiveSessionAsync = getActiveSession;
 
 /**
  * Express middleware to enforce authentication on protected internal endpoints.
@@ -426,6 +443,17 @@ export function apiRateLimiter(maxRequests: number = 100, windowMs: number = 600
       if (!result.allowed) {
         const retryAfter = Math.ceil((result.resetAt - now) / 1000);
         res.setHeader("Retry-After", retryAfter);
+        recordAuditEvent({
+          requestId: (req as any).id || `req-limit-${generateSecureToken(6)}`,
+          userIdentifier: (req as any).user || "anonymous",
+          sessionId: (req as any).session?.sessionId || null,
+          action: "API_RATE_LIMITED",
+          route: req.path,
+          outcome: "BLOCKED",
+          statusCode: 429,
+          clientIp: ip,
+          metadata: { keyPrefix, limit: maxRequests, retryAfterSeconds: retryAfter },
+        }).catch(() => {});
         return res.status(429).json({
           error: "Rate limit exceeded. Please slow down requests.",
           code: "RATE_LIMITED",
