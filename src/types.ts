@@ -471,8 +471,48 @@ export interface DefenseScanResult {
 
 export interface SecurityClearance {
   isCleared: boolean;
-  passcodeUsed?: string;
+  clearanceId?: string;
+  clearanceToken?: string;
   projectName?: string;
   timestamp?: string;
+  expiresAt?: string;
   authorizedScope?: string;
+  passcodeUsed?: string; // deprecated - secrets are never returned in responses
+}
+
+export interface AuditEventItem {
+  id: string;
+  requestId: string;
+  userIdentifier: string;
+  action: string;
+  route: string;
+  targetResource?: string | null;
+  outcome: "SUCCESS" | "FAILURE" | "BLOCKED" | "ERROR";
+  statusCode: number;
+  ipAddressHash?: string | null;
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface ReadinessCheckItem {
+  id: string;
+  name: string;
+  category: "HEALTH" | "PERSISTENCE" | "CONFIG" | "SECURITY" | "AI_INTEGRATION";
+  status: "NOT_RUN" | "PASSED" | "FAILED" | "SKIPPED";
+  evidence: string;
+  durationMs: number;
+  details?: Record<string, any>;
+}
+
+export interface ReadinessSuiteItem {
+  suiteId: string;
+  timestamp: string;
+  status: "PASSED" | "FAILED" | "INCOMPLETE";
+  checks: ReadinessCheckItem[];
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+  };
 }

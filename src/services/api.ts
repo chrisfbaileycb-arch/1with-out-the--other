@@ -6,6 +6,8 @@ import {
   ProcessingMode,
   DefenseScanResult,
   SecurityClearance,
+  AuditEventItem,
+  ReadinessSuiteItem,
 } from "../types";
 
 export interface PipelineResult {
@@ -166,4 +168,80 @@ export async function processPipeline(
   }
 
   return await res.json();
+}
+
+export async function fetchAuditLogs(limit: number = 50, offset: number = 0): Promise<AuditEventItem[]> {
+  const res = await fetch(`/api/admin/audit-logs?limit=${limit}&offset=${offset}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to fetch audit logs (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.events || [];
+}
+
+export async function runDeploymentReadiness(): Promise<ReadinessSuiteItem> {
+  const res = await fetch("/api/admin/readiness/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Readiness test failed with status ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data.suite;
+}
+
+export async function fetchLatestReadiness(): Promise<ReadinessSuiteItem | null> {
+  const res = await fetch("/api/admin/readiness/latest", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.suite || null;
+}
+
+export async function loginOperator(username: string, password: string): Promise<{ success: boolean; user?: string; error?: string }> {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Login failed");
+  }
+
+  return await res.json();
+}
+
+export async function logoutOperator(): Promise<void> {
+  await fetch("/api/auth/logout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fetchOperatorSession(): Promise<{ authenticated: boolean; user?: string } | null> {
+  try {
+    const res = await fetch("/api/auth/session", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) return { authenticated: false };
+    return await res.json();
+  } catch {
+    return { authenticated: false };
+  }
 }

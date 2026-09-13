@@ -1,16 +1,50 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
+
+import { serverConfig } from "./server/config";
+import { repository } from "./server/repository";
+import {
+  verifyAndAuthorizePasscode,
+  validateClearanceToken,
+  authenticateInternalUser,
+  invalidateSession,
+  getActiveSession,
+  apiRateLimiter,
+  requireAuth,
+  enforceCsrfProtection,
+} from "./server/security";
+import { evaluateDefenseSafety } from "./server/defense";
+import { auditTrailMiddleware, recordAuditEvent } from "./server/audit";
+import { runDeploymentReadinessChecks, getLatestReadinessSuite } from "./server/readiness";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+// Security response headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+// Audit trail & correlation ID middleware
+app.use(auditTrailMiddleware);
+
+// Cookie Parser & JSON parsers with safe defensive limits
+app.use(cookieParser(serverConfig.sessionSecret));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// General rate limiter on /api/ routes
+app.use("/api/", apiRateLimiter(250, 60000));
 
 // Lazy Google GenAI initializer
 function getGeminiClient(): GoogleGenAI | null {
@@ -66,167 +100,190 @@ async function callGeminiWithFallback(
 }
 
 // -------------------------------------------------------------
-// DEFENSE-OF-BREAK SAFETY SCANNER & PASSCODE AUTHORIZATION
+// CORE API ROUTES: HEALTH, DEFENSE, AUDIT, & OPERATOR AUTH
 // -------------------------------------------------------------
-const ALLOWLISTED_PASSCODES = new Set([
-  "1WITHOUT-2026-CLEARANCE",
-  "BANKRUPTCY-COMPLIANCE-2026",
-  "CHAPTER11-RESTOCK-PASS",
-  "ENTERPRISE-AUDIT-SAFE",
-  "1WITHOUT-ALLOWABLE-PROJECT",
-]);
 
-function performDefenseOfBreakScan(content: string): {
-  isBlocked: boolean;
-  category: "PERSONAL_DATA_PII" | "HEALTH_MEDICAL" | "UNAUTHORIZED_LEGAL" | "NONE";
-  reason: string;
-  detectedSnippets: string[];
-  allowlistedProjectEligible: boolean;
-  suggestedAction: string;
-} {
-  const lower = content.toLowerCase();
-
-  // 1. Personal Data & PII Scanner
-  const ssnRegex = /\b\d{3}-\d{2}-\d{4}\b/g;
-  const creditCardRegex = /\b(?:\d{4}[ -]?){3}\d{4}\b/g;
-  const piiMatches = [
-    ...(content.match(ssnRegex) || []),
-    ...(content.match(creditCardRegex) || []),
-  ];
-
-  const hasPiiKeywords = /\b(unredacted ssn|social security number|driver's license number|passport scan|private personal data)\b/i.test(content);
-
-  // 2. Health & Medical Data / Advice Scanner
-  const hasMedical = /\b(diagnose patient|prescribe medication|medical diagnosis|patient health record|phi record|cure cancer|fda secret cure)\b/i.test(content);
-
-  // 3. Legal / Court / Bankruptcy / Unauthorized Law
-  const hasBankruptcy = /\b(bankruptcy|chapter 11|chapter 7|chapter 13|debtor schedule|pacer docket|ucc-1|creditor claim)\b/i.test(content);
-  const hasIllegalLegal = /\b(evade taxes|counterfeit|unauthorized court filing|forge legal signature|hack database)\b/i.test(content);
-
-  if (hasIllegalLegal) {
-    return {
-      isBlocked: true,
-      category: "UNAUTHORIZED_LEGAL",
-      reason: "Content requests unlawful or malicious operations. 1WithOut operates with strict zero-tolerance defense rules.",
-      detectedSnippets: ["Illegal / Malicious Legal Operation Triggered"],
-      allowlistedProjectEligible: false,
-      suggestedAction: "Modify instructions to strictly adhere to standard lawful software engineering boundaries.",
-    };
-  }
-
-  if (hasMedical) {
-    return {
-      isBlocked: true,
-      category: "HEALTH_MEDICAL",
-      reason: "Content involves private health records or diagnostic/medical claims. 1WithOut is restricted from parsing unallowable medical/health operations.",
-      detectedSnippets: ["Medical / PHI Pattern Detected"],
-      allowlistedProjectEligible: false,
-      suggestedAction: "Remove patient identifiers and health diagnostic directives from workflow before execution.",
-    };
-  }
-
-  if (hasBankruptcy) {
-    // Bankruptcy projects are allowlisted IF protected by Defense-of-Break Passcode
-    return {
-      isBlocked: true,
-      category: "UNAUTHORIZED_LEGAL",
-      reason: "Bankruptcy / Legal Restructuring content detected. This is an Allowlisted Project class requiring Defense-of-Break Passcode Clearance.",
-      detectedSnippets: ["Bankruptcy / Debt Schedule Workflow Pattern"],
-      allowlistedProjectEligible: true,
-      suggestedAction: "Provide an authorized Defense-of-Break clearance passcode (e.g. '1WITHOUT-2026-CLEARANCE' or 'BANKRUPTCY-COMPLIANCE-2026') to unlock this allowable project.",
-    };
-  }
-
-  if (piiMatches.length > 0 || hasPiiKeywords) {
-    return {
-      isBlocked: true,
-      category: "PERSONAL_DATA_PII",
-      reason: "Unredacted personal data (PII) or sensitive personal credentials detected. 1WithOut enforces a strict defense barrier.",
-      detectedSnippets: piiMatches.slice(0, 3),
-      allowlistedProjectEligible: false,
-      suggestedAction: "Scrub and anonymize personal identifiers prior to workflow generation.",
-    };
-  }
-
-  return {
-    isBlocked: false,
-    category: "NONE",
-    reason: "No restricted safety boundaries breached. Safe for 1WithOut autonomous compilation.",
-    detectedSnippets: [],
-    allowlistedProjectEligible: true,
-    suggestedAction: "Proceed with standard pipeline compilation.",
-  };
-}
-
-// 1. API: Health Check
-app.get("/api/health", (req, res) => {
+// 1. API: Health Check (Truthful runtime & persistence diagnostics)
+app.get("/api/health", async (req, res) => {
+  const repoHealth = await repository.healthCheck();
   res.json({
     status: "ok",
     app: "1WithOut Master Engine",
     version: "2.0.0",
     hasApiKey: !!process.env.GEMINI_API_KEY,
+    persistenceMode: repoHealth.mode,
+    persistenceHealthy: repoHealth.healthy,
     timestamp: new Date().toISOString(),
   });
 });
 
-// 2. API: Defense-of-Break Scanner & Passcode Validation
-app.post("/api/defense/scan", (req, res) => {
+// 2. API: Defense-of-Break Heuristic Sentinel Scan (4-state decision)
+app.post("/api/defense/scan", async (req, res) => {
   try {
-    const { content } = req.body;
+    const { content, clearanceToken } = req.body;
     if (!content || typeof content !== "string") {
       return res.status(400).json({ error: "Content is required for safety scan." });
     }
-    const result = performDefenseOfBreakScan(content);
-    return res.json(result);
+    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+    const result = await evaluateDefenseSafety(content, clearanceToken, sessionId);
+
+    // Backward-compatible + 4-state format
+    return res.json({
+      ...result,
+      isBlocked:
+        result.decision === "BLOCKED" ||
+        (result.decision === "REQUIRES_AUTHORIZATION" && result.authorizationStatus !== "AUTHORIZED"),
+      reason: result.sanitizedReason,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || "Defense scan failed." });
   }
 });
 
-app.post("/api/defense/authorize-passcode", (req, res) => {
+// 3. API: Passcode Clearance Authorization (Constant-time, Rate-limited, No secrets returned)
+app.post("/api/defense/authorize-passcode", apiRateLimiter(15, 60000), async (req, res) => {
   try {
     const { passcode, projectName, scope } = req.body;
-    const cleanPass = (passcode || "").trim();
+    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
 
-    if (ALLOWLISTED_PASSCODES.has(cleanPass) || cleanPass.startsWith("1WITHOUT-")) {
-      return res.json({
-        isCleared: true,
-        passcodeUsed: cleanPass,
-        projectName: projectName || "Allowlisted Compliance Project",
-        timestamp: new Date().toISOString(),
-        authorizedScope: scope || "Corporate Bankruptcy Restructuring / Document Normalization",
-        message: "Defense-of-Break clearance granted. Allowlisted project unlocked for execution.",
-      });
-    } else {
-      return res.status(403).json({
+    const authRes = await verifyAndAuthorizePasscode(passcode, projectName, scope, clientIp, sessionId);
+
+    if (!authRes.success) {
+      return res.status(authRes.statusCode).json({
         isCleared: false,
-        error: "Invalid Defense-of-Break Passcode. Execution remains locked.",
+        error: authRes.error,
       });
     }
+
+    return res.json({
+      isCleared: true,
+      clearanceId: authRes.clearance?.clearanceId,
+      clearanceToken: authRes.clearance?.clearanceToken,
+      projectName: authRes.clearance?.projectName,
+      authorizedScope: authRes.clearance?.authorizedScope,
+      issuedAt: authRes.clearance?.issuedAt,
+      expiresAt: authRes.clearance?.expiresAt,
+      timestamp: new Date().toISOString(),
+      message: "Defense-of-Break compliance clearance granted. Allowlisted project unlocked for execution.",
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || "Authorization failed." });
   }
 });
 
-// 3. API: Claims & Opportunity Discernment Engine
+// 4. API: Operator Authentication & Session Management
+app.post("/api/auth/login", apiRateLimiter(10, 60000), async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await authenticateInternalUser(username, password);
+    if (!result.success || !result.session) {
+      return res.status(401).json({ success: false, error: result.error || "Authentication failed." });
+    }
+
+    // Set secure HTTP-only cookie
+    res.cookie("1without_session", result.session.sessionId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 8 * 60 * 60 * 1000,
+    });
+
+    return res.json({
+      success: true,
+      user: result.session.user,
+      csrfToken: result.session.csrfToken,
+      expiresAt: new Date(result.session.expiresAt).toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Login failed." });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  const sessionId = req.cookies?.["1without_session"];
+  if (sessionId) invalidateSession(sessionId);
+  res.clearCookie("1without_session");
+  return res.json({ success: true, message: "Session ended." });
+});
+
+app.get("/api/auth/session", (req, res) => {
+  const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+  const session = getActiveSession(sessionId);
+  if (!session) {
+    return res.json({ authenticated: false });
+  }
+  return res.json({
+    authenticated: true,
+    user: session.user,
+    role: session.role,
+    expiresAt: new Date(session.expiresAt).toISOString(),
+  });
+});
+
+// 5. API: Internal Audit Logs (Read with pagination)
+app.get("/api/admin/audit-logs", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 100);
+    const offset = parseInt(req.query.offset as string, 10) || 0;
+    const events = await repository.getAuditEvents(limit, offset);
+    return res.json({ events, total: events.length });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Failed to load audit logs." });
+  }
+});
+
+// 6. API: Deployment & Runtime Readiness Checks
+app.post("/api/admin/readiness/run", async (req, res) => {
+  try {
+    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+    const suite = await runDeploymentReadinessChecks(sessionId);
+    return res.json({ success: true, suite });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || "Readiness execution failed." });
+  }
+});
+
+app.get("/api/admin/readiness/latest", (req, res) => {
+  const suite = getLatestReadinessSuite();
+  return res.json({ suite });
+});
+
+// 7. API: Claims & Opportunity Discernment Engine
 app.post("/api/discern", async (req, res) => {
   try {
-    const { content, inputType, sourceUrl, mode = "evaluate", securityPasscode } = req.body;
+    const { content, inputType, sourceUrl, mode = "evaluate", securityPasscode, clearanceToken } = req.body;
 
     if (!content || typeof content !== "string" || content.trim().length === 0) {
       return res.status(400).json({ error: "Content is required for discernment evaluation." });
     }
 
-    // Safety Gate Check
-    const defense = performDefenseOfBreakScan(content);
-    if (defense.isBlocked) {
-      const isCleared = securityPasscode && (ALLOWLISTED_PASSCODES.has(securityPasscode) || securityPasscode.startsWith("1WITHOUT-"));
-      if (!isCleared) {
-        return res.status(403).json({
-          error: "DEFENSE-OF-BREAK LOCK: " + defense.reason,
-          defenseScan: defense,
-        });
+    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+    let clearance = validateClearanceToken(clearanceToken);
+
+    // If client provided securityPasscode, verify it without exposing secrets
+    if (!clearance && securityPasscode) {
+      const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+      const authRes = await verifyAndAuthorizePasscode(securityPasscode, "Discernment Project", undefined, clientIp, sessionId);
+      if (authRes.success && authRes.clearance) {
+        clearance = authRes.clearance;
       }
+    }
+
+    // Heuristic Safety Gate Check
+    const defense = await evaluateDefenseSafety(content, clearance?.clearanceToken, sessionId);
+    if (
+      defense.decision === "BLOCKED" ||
+      (defense.decision === "REQUIRES_AUTHORIZATION" && defense.authorizationStatus !== "AUTHORIZED")
+    ) {
+      return res.status(403).json({
+        error: "DEFENSE-OF-BREAK LOCK: " + defense.sanitizedReason,
+        defenseScan: {
+          ...defense,
+          isBlocked: true,
+          reason: defense.sanitizedReason,
+        },
+      });
     }
 
     const ai = getGeminiClient();
@@ -340,22 +397,38 @@ app.post("/api/skills/build", async (req, res) => {
       targetPlatform = "universal",
       sourceModality = "text",
       securityPasscode,
+      clearanceToken,
     } = req.body;
 
     if (!tutorialContent || typeof tutorialContent !== "string") {
       return res.status(400).json({ error: "Tutorial/procedure content is required to build a skill." });
     }
 
-    // Safety Gate Check
-    const defense = performDefenseOfBreakScan(tutorialContent);
-    if (defense.isBlocked) {
-      const isCleared = securityPasscode && (ALLOWLISTED_PASSCODES.has(securityPasscode) || securityPasscode.startsWith("1WITHOUT-"));
-      if (!isCleared) {
-        return res.status(403).json({
-          error: "DEFENSE-OF-BREAK LOCK: " + defense.reason,
-          defenseScan: defense,
-        });
+    const sessionId = req.cookies?.["1without_session"] || (req.headers["x-session-id"] as string);
+    let clearance = validateClearanceToken(clearanceToken);
+
+    if (!clearance && securityPasscode) {
+      const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+      const authRes = await verifyAndAuthorizePasscode(securityPasscode, "Skill Builder Project", undefined, clientIp, sessionId);
+      if (authRes.success && authRes.clearance) {
+        clearance = authRes.clearance;
       }
+    }
+
+    // Safety Gate Check
+    const defense = await evaluateDefenseSafety(tutorialContent, clearance?.clearanceToken, sessionId);
+    if (
+      defense.decision === "BLOCKED" ||
+      (defense.decision === "REQUIRES_AUTHORIZATION" && defense.authorizationStatus !== "AUTHORIZED")
+    ) {
+      return res.status(403).json({
+        error: "DEFENSE-OF-BREAK LOCK: " + defense.sanitizedReason,
+        defenseScan: {
+          ...defense,
+          isBlocked: true,
+          reason: defense.sanitizedReason,
+        },
+      });
     }
 
     const ai = getGeminiClient();
@@ -1517,6 +1590,22 @@ function generateLocalPipelineResponse(mode?: string, title?: string) {
   };
 }
 
+// Safe Centralized Error Handler (Prevents leakage of internal stack traces)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const requestId = (req as any).id || "req-unknown";
+  const statusCode = err.status || err.statusCode || 500;
+  const isProd = process.env.NODE_ENV === "production";
+
+  console.error(`[1WithOut Error] [${requestId}] ${req.method} ${req.path}:`, err);
+
+  res.status(statusCode).json({
+    error: isProd && statusCode === 500 ? "Internal server error occurred." : err.message || "An unexpected error occurred.",
+    code: err.code || "SERVER_ERROR",
+    requestId,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Vite middleware / Static serving
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
@@ -1533,9 +1622,20 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`1WithOut Master Engine running on http://0.0.0.0:${PORT}`);
   });
+
+  const shutdown = async (signal: string) => {
+    console.log(`[1WithOut] Received ${signal}. Shutting down gracefully...`);
+    server.close(async () => {
+      await repository.close();
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer();
